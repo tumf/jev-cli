@@ -2,6 +2,8 @@ import io
 import json
 import os
 import unittest
+import urllib.error
+from email.message import Message
 from unittest.mock import patch
 
 import jev_cli as jev
@@ -52,6 +54,40 @@ class JevTest(unittest.TestCase):
         self.assertEqual(jev.primary_value(result, "noul"), 0.9)
         self.assertEqual(jev.primary_value(result, "choice"), "a")
         self.assertEqual(jev.primary_value(result, "score"), 1.5)
+
+    def test_call_maps_authentication_failure_to_exit_code_3(self):
+        error = urllib.error.HTTPError(
+            "https://example.test", 401, "Unauthorized", Message(), io.BytesIO(b'{"error":"bad key"}')
+        )
+        with patch.object(jev, "api_key", return_value="test-key"), patch(
+            "urllib.request.urlopen", side_effect=error
+        ):
+            with self.assertRaisesRegex(jev.CliError, "API HTTP 401") as raised:
+                jev.call({"state": "test", "questions": {}}, "https://example.test")
+        self.assertEqual(raised.exception.exit_code, 3)
+
+    def test_call_maps_connection_failure_to_exit_code_4(self):
+        with patch.object(jev, "api_key", return_value="test-key"), patch(
+            "urllib.request.urlopen", side_effect=urllib.error.URLError("offline")
+        ):
+            with self.assertRaisesRegex(jev.CliError, "API connection failed") as raised:
+                jev.call({"state": "test", "questions": {}}, "https://example.test")
+        self.assertEqual(raised.exception.exit_code, 4)
+
+    def test_main_prints_only_primary_value(self):
+        argv = ["jev", "noul", "Urgent?", "today", "--value"]
+        with patch("sys.argv", argv), patch.object(
+            jev, "call", return_value={"answers": {"answer": {"noul": 0.9}}}
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(jev.main(), 0)
+        self.assertEqual(stdout.getvalue(), "0.9\n")
+
+    def test_main_emits_structured_error(self):
+        with patch("sys.argv", ["jev", "run", "missing.json"]), patch(
+            "sys.stderr", new_callable=io.StringIO
+        ) as stderr:
+            self.assertEqual(jev.main(), 2)
+        self.assertEqual(json.loads(stderr.getvalue())["ok"], False)
 
 
 if __name__ == "__main__":

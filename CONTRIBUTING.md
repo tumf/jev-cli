@@ -32,6 +32,14 @@ make install
 
 The project follows [Semantic Versioning](https://semver.org/). The version source of truth is `project.version` in `pyproject.toml`.
 
+## Release preparation
+
+Releases use `v<version>` tags, such as `v0.2.0`. The tag must match `project.version` in `pyproject.toml`.
+
+The tag-triggered workflow reruns the quality gate, builds and smoke-tests the wheel, uploads the distributions as a workflow artifact, and creates a GitHub Release. It does not publish to PyPI.
+
+Do not create or push a release tag until the exact commit has passed CI and the release is explicitly approved.
+
 ## Pull requests
 
 - Keep changes focused.

@@ -256,28 +256,6 @@ The `jev` command is a thin client for focused System One judgments. It does not
 
 The CLI sends the supplied state and questions to the TypeSafe API. Do not submit data that your organization is not permitted to send to that service.
 
-## Development
-
-Run the full local quality gate before committing:
-
-```bash
-make check
-```
-
-Individual targets are also available:
-
-```bash
-make test
-make build
-make install
-```
-
-`make check` runs six unit tests and builds both the wheel and source distribution. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and [SECURITY.md](SECURITY.md) for vulnerability reporting.
-
-## Versioning
-
-The project follows [Semantic Versioning](https://semver.org/). The version source of truth is `project.version` in `pyproject.toml`.
-
 ## License
 
 [MIT](LICENSE)

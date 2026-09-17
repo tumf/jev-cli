@@ -41,7 +41,7 @@ def api_key() -> str:
 
 def set_api_key() -> None:
     if sys.stdin.isatty():
-        raise CliError("API key must be piped to stdin; example: pbpaste | jev-cli auth set")
+        raise CliError("API key must be piped to stdin: jev-cli auth set")
     value = sys.stdin.read().strip()
     if not value:
         raise CliError("API key is empty")

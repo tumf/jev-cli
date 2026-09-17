@@ -43,8 +43,9 @@ class JevTest(unittest.TestCase):
         ), patch("sys.stdin", io.StringIO("test-key\n")), patch.dict(os.environ, {}, clear=True):
             jev.set_api_key()
             self.assertEqual(jev.api_key(), "test-key")
-            self.assertEqual(jev.CREDENTIALS_FILE.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(jev.CREDENTIALS_FILE.parent.stat().st_mode & 0o777, 0o700)
+            if os.name == "posix":
+                self.assertEqual(jev.CREDENTIALS_FILE.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(jev.CREDENTIALS_FILE.parent.stat().st_mode & 0o777, 0o700)
 
     def test_primary_values(self):
         result = {"answers": {"answer": {"noul": 0.9, "choice": "a", "score": 1.5}}}

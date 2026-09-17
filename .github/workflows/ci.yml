@@ -24,5 +24,4 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run python -m unittest discover -s tests -v
-      - run: uv build
+      - run: make check

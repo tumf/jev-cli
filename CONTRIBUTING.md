@@ -8,7 +8,7 @@ Install [uv](https://docs.astral.sh/uv/), clone the repository, then run:
 
 ```bash
 uv sync
-uv run --python 3.13 -m unittest discover -s tests -v
+make check
 ```
 
 ## Pull requests

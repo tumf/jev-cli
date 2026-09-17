@@ -11,12 +11,12 @@ A small, dependency-free command-line client for [TypeSafe Jev](https://docs.typ
 
 ## Install
 
-Clone the repository and install it with [uv](https://docs.astral.sh/uv/):
+Clone the repository and install it with [uv](https://docs.astral.sh/uv/) through the Makefile:
 
 ```bash
 git clone https://github.com/tumf/jev-cli.git
 cd jev-cli
-uv tool install --editable .
+make install
 ```
 
 Check the installation:
@@ -132,13 +132,19 @@ Errors are emitted as JSON on stderr.
 Run the test suite:
 
 ```bash
-uv run --python 3.13 -m unittest discover -s tests -v
+make test
 ```
 
 Build the package:
 
 ```bash
-uv build
+make build
+```
+
+Run both checks:
+
+```bash
+make check
 ```
 
 ## License

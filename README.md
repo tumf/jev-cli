@@ -2,10 +2,14 @@
 
 miniから[TypeSafe Jev](https://docs.typesafe.ai/introduction)を呼ぶための小さなCLIです。Python標準ライブラリだけで動きます。
 
-APIキーは次の順で読み込みます。
+APIキーはJev CLI専用の `~/.config/jev/credentials.json` へ保存します。ディレクトリは所有者限定、ファイル権限は `0600` です。dotenvや環境変数には依存しません。
 
-1. 環境変数 `TYPESAFE_API_KEY`
-2. `dotenvx get -f ~/.env --format raw TYPESAFE_API_KEY`
+初回だけ、クリップボードのAPIキーを保存してください。キー自体は画面へ表示されません。
+
+```bash
+pbpaste | jev auth set
+jev auth status
+```
 
 ## 使い方
 

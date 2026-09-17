@@ -6,14 +6,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 API_URL = "https://api.typesafe.ai/v1/systemone"
+CREDENTIALS_FILE = Path.home() / ".config" / "jev" / "credentials.json"
 
 
 class CliError(Exception):
@@ -23,24 +24,35 @@ class CliError(Exception):
 
 
 def api_key() -> str:
-    if value := os.environ.get("TYPESAFE_API_KEY"):
-        return value
     try:
-        result = subprocess.run(
-            ["dotenvx", "get", "-f", str(Path.home() / ".env"), "--format", "raw", "TYPESAFE_API_KEY"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        data = json.loads(CREDENTIALS_FILE.read_text())
+        value = data["api_key"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CliError(
-            "TYPESAFE_API_KEY is unset and dotenvx could not read it from ~/.env",
+            "TypeSafe API key is not stored; run: pbpaste | jev auth set",
             3,
         ) from exc
-    value = result.stdout.strip()
-    if not value:
-        raise CliError("TYPESAFE_API_KEY is empty", 3)
+    if not isinstance(value, str) or not value:
+        raise CliError("stored TypeSafe API key is empty", 3)
     return value
+
+
+def set_api_key() -> None:
+    if sys.stdin.isatty():
+        raise CliError("API key must be piped to stdin; example: pbpaste | jev auth set")
+    value = sys.stdin.read().strip()
+    if not value:
+        raise CliError("API key is empty")
+    CREDENTIALS_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        fd, temporary = tempfile.mkstemp(dir=CREDENTIALS_FILE.parent)
+        with os.fdopen(fd, "w") as file:
+            json.dump({"api_key": value}, file)
+            file.write("\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, CREDENTIALS_FILE)
+    except OSError as exc:
+        raise CliError("could not write the Jev credential store", 3) from exc
 
 
 def read_text(value: str | None) -> str:
@@ -91,7 +103,7 @@ def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
         headers={
             "Authorization": f"Bearer {api_key()}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.1.0",
+            "User-Agent": "jev-cli/0.2.0",
         },
         method="POST",
     )
@@ -126,11 +138,16 @@ def common_parser() -> argparse.ArgumentParser:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="jev",
-        description="Evaluate text or JSON with TypeSafe Jev. Reads TYPESAFE_API_KEY from the environment or ~/.env via dotenvx.",
+        description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.1.0")
+    root.add_argument("--version", action="version", version="jev 0.2.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
+
+    auth = sub.add_parser("auth", help="manage the API key in the Jev credential store")
+    auth_sub = auth.add_subparsers(dest="auth_command", required=True)
+    auth_sub.add_parser("set", help="store an API key read from stdin")
+    auth_sub.add_parser("status", help="check whether an API key is stored")
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
     noul.add_argument("question")
@@ -180,6 +197,14 @@ def primary_value(result: dict[str, Any], kind: str | None) -> Any:
 def main() -> int:
     try:
         args = parser().parse_args()
+        if args.command == "auth":
+            if args.auth_command == "set":
+                set_api_key()
+                print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
+            else:
+                api_key()
+                print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
+            return 0
         payload, kind = request_for(args)
         result = call(payload, args.endpoint)
         if args.value:

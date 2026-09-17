@@ -22,9 +22,22 @@ class JevTest(unittest.TestCase):
             payload, _ = jev.request_for(args)
         self.assertEqual(payload["state"], {"message": "today"})
 
-    def test_api_key_prefers_environment(self):
-        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "test-key"}):
+    def test_api_key_reads_credential_store(self):
+        with patch.object(jev, "CREDENTIALS_FILE") as path:
+            path.read_text.return_value = '{"api_key":"test-key"}'
             self.assertEqual(jev.api_key(), "test-key")
+
+    def test_set_api_key_writes_private_credential_store(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            jev, "CREDENTIALS_FILE", Path(directory) / "jev" / "credentials.json"
+        ), patch("sys.stdin", io.StringIO("test-key\n")):
+            jev.set_api_key()
+            self.assertEqual(jev.api_key(), "test-key")
+            self.assertEqual(jev.CREDENTIALS_FILE.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(jev.CREDENTIALS_FILE.parent.stat().st_mode & 0o777, 0o700)
 
     def test_primary_values(self):
         result = {"answers": {"answer": {"noul": 0.9, "choice": "a", "score": 1.5}}}

@@ -22,7 +22,7 @@ Repository = "https://github.com/tumf/jev-cli"
 Issues = "https://github.com/tumf/jev-cli/issues"
 
 [project.scripts]
-jev-cli = "jev_cli:main"
+jev = "jev_cli:main"
 
 [build-system]
 requires = ["uv_build>=0.8.15,<0.9.0"]

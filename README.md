@@ -2,7 +2,7 @@
 
 A small, dependency-free CLI for [TypeSafe Jev](https://docs.typesafe.ai/introduction). Send text or JSON state, ask typed questions, and receive machine-readable `noul`, `choice`, or `score` answers.
 
-`jev-cli` is useful when application code needs a fast classification or judgment instead of generated prose.
+The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose.
 
 > This is an independent community project. It is not affiliated with or endorsed by TypeSafe AI.
 
@@ -25,7 +25,7 @@ A small, dependency-free CLI for [TypeSafe Jev](https://docs.typesafe.ai/introdu
 
 ## Install
 
-Clone the repository and install the command with `uv tool` through the Makefile. This installs `jev-cli` into uv's executable directory and verifies the installed version.
+Clone the repository and install the command with `uv tool` through the Makefile. This installs `jev` into uv's executable directory and verifies the installed version.
 
 ```bash
 git clone https://github.com/tumf/jev-cli.git
@@ -36,13 +36,13 @@ make install
 Verify that the command is available:
 
 ```bash
-jev-cli --version
+jev --version
 ```
 
 Expected output:
 
 ```text
-jev-cli 0.2.0
+jev 0.2.0
 ```
 
 ## Authentication
@@ -51,14 +51,14 @@ The recommended approach for automation is the `TYPESAFE_API_KEY` environment va
 
 ```bash
 export TYPESAFE_API_KEY='your-api-key'
-jev-cli auth status
+jev auth status
 ```
 
 For local use, pipe the key to the private credential store instead. `auth set` does not accept the key as a command-line argument, which keeps it out of process arguments and shell history.
 
 ```bash
-printf '%s' 'your-api-key' | jev-cli auth set
-jev-cli auth status
+printf '%s' 'your-api-key' | jev auth set
+jev auth status
 ```
 
 `auth status` reports only whether a key is available. It never prints the key.
@@ -75,7 +75,7 @@ The credential directory is created with mode `0700`; the file is written atomic
 Ask whether a message expresses urgency. `--value` prints only the resulting probability from `0` to `1`.
 
 ```bash
-jev-cli noul \
+jev noul \
   'Does this message express urgency?' \
   'Please restore service today.' \
   --value
@@ -90,7 +90,7 @@ Example output:
 Without `--value`, the command returns the complete API response as JSON, including model and token usage.
 
 ```bash
-jev-cli noul \
+jev noul \
   'Does this message express urgency?' \
   'Please restore service today.' \
   --pretty
@@ -103,7 +103,7 @@ jev-cli noul \
 Use `noul` for one focused yes/no judgment. The value is the probability that the answer is yes.
 
 ```bash
-jev-cli noul \
+jev noul \
   'Does this message request a refund?' \
   'The integration is broken, but I do not want a refund.' \
   --value
@@ -114,7 +114,7 @@ jev-cli noul \
 Use `choice` when the answer must be one of a known set. Each option uses `KEY=DESCRIPTION` syntax.
 
 ```bash
-jev-cli choice \
+jev choice \
   'Which team should handle this?' \
   'The payment integration keeps failing.' \
   -o 'billing=Payment, charge, or refund issues' \
@@ -128,7 +128,7 @@ jev-cli choice \
 Use `score` for an ordered scale. Levels are numbered from zero in the order supplied.
 
 ```bash
-jev-cli score \
+jev score \
   'How frustrated is the customer?' \
   'This has failed for three days. Please help.' \
   -l 'Calm' \
@@ -145,7 +145,7 @@ Omit the state or pass `-` to read it from stdin. This is useful for pipelines a
 
 ```bash
 printf '%s' 'Please resolve this today.' | \
-  jev-cli noul 'Does this message express urgency?' --value
+  jev noul 'Does this message express urgency?' --value
 ```
 
 ### File input
@@ -153,7 +153,7 @@ printf '%s' 'Please resolve this today.' | \
 Prefix a path with `@` to read its contents.
 
 ```bash
-jev-cli noul \
+jev noul \
   'Does this document mention security risks?' \
   @document.txt \
   --value
@@ -165,7 +165,7 @@ Use `--json-state` to parse the state as JSON. Instructions can refer to named f
 
 ```bash
 printf '%s' '{"message":"Please respond today"}' | \
-  jev-cli noul \
+  jev noul \
   'Does `message` express urgency?' \
   --json-state \
   --value
@@ -204,13 +204,13 @@ Create `request.json`:
 Send it in one request:
 
 ```bash
-jev-cli run request.json --pretty
+jev run request.json --pretty
 ```
 
 A request can also be piped through stdin:
 
 ```bash
-cat request.json | jev-cli run - --pretty
+cat request.json | jev run - --pretty
 ```
 
 ## Output and automation
@@ -221,7 +221,7 @@ Use `--value` with `noul`, `choice`, or `score` when a script needs only the pri
 
 ```bash
 if awk 'BEGIN { exit !(ARGV[1] >= 0.9) }' \
-  "$(jev-cli noul 'Is this urgent?' 'Restore service today.' --value)"; then
+  "$(jev noul 'Is this urgent?' 'Restore service today.' --value)"; then
   echo urgent
 fi
 ```
@@ -229,7 +229,7 @@ fi
 Use `--model` to select another model available to the account:
 
 ```bash
-jev-cli noul 'Is this urgent?' 'Restore service today.' \
+jev noul 'Is this urgent?' 'Restore service today.' \
   --model jev-latest \
   --pretty
 ```
@@ -247,12 +247,12 @@ jev-cli noul 'Is this urgent?' 'Restore service today.' \
 An error is emitted as JSON on stderr:
 
 ```json
-{"ok": false, "error": "TypeSafe API key is not stored; pipe it to: jev-cli auth set"}
+{"ok": false, "error": "TypeSafe API key is not stored; pipe it to: jev auth set"}
 ```
 
 ## Scope and limitations
 
-`jev-cli` is a thin client for focused System One judgments. It does not generate prose, perform arithmetic, compare dates, or replace application-level validation. Keep deterministic work in code and use Jev for semantic judgments.
+The `jev` command is a thin client for focused System One judgments. It does not generate prose, perform arithmetic, compare dates, or replace application-level validation. Keep deterministic work in code and use Jev for semantic judgments.
 
 The CLI sends the supplied state and questions to the TypeSafe API. Do not submit data that your organization is not permitted to send to that service.
 

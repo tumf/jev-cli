@@ -31,7 +31,7 @@ def api_key() -> str:
         value = data["api_key"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CliError(
-            "TypeSafe API key is not stored; pipe it to: jev-cli auth set",
+            "TypeSafe API key is not stored; pipe it to: jev auth set",
             3,
         ) from exc
     if not isinstance(value, str) or not value:
@@ -41,7 +41,7 @@ def api_key() -> str:
 
 def set_api_key() -> None:
     if sys.stdin.isatty():
-        raise CliError("API key must be piped to stdin: jev-cli auth set")
+        raise CliError("API key must be piped to stdin: jev auth set")
     value = sys.stdin.read().strip()
     if not value:
         raise CliError("API key is empty")
@@ -139,10 +139,10 @@ def common_parser() -> argparse.ArgumentParser:
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        prog="jev-cli",
+        prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev-cli 0.2.0")
+    root.add_argument("--version", action="version", version="jev 0.2.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 

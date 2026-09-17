@@ -6,7 +6,7 @@ UV_TOOL_BIN := $(shell $(UV) tool dir --bin)
 install:
 	@command -v "$(UV)" >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
 	$(UV) tool install --force .
-	"$(UV_TOOL_BIN)/jev-cli" --version
+	"$(UV_TOOL_BIN)/jev" --version
 
 test:
 	$(UV) run --python 3.13 -m unittest discover -s tests -v

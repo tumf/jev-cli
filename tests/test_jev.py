@@ -39,7 +39,7 @@ class JevTest(unittest.TestCase):
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as directory, patch.object(
-            jev, "CREDENTIALS_FILE", Path(directory) / "jev" / "credentials.json"
+            jev, "CREDENTIALS_FILE", Path(directory) / "jev-cli" / "credentials.json"
         ), patch("sys.stdin", io.StringIO("test-key\n")), patch.dict(os.environ, {}, clear=True):
             jev.set_api_key()
             self.assertEqual(jev.api_key(), "test-key")

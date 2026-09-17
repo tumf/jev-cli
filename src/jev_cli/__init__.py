@@ -31,7 +31,7 @@ def api_key() -> str:
         value = data["api_key"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CliError(
-            "TypeSafe API key is not stored; run: pbpaste | jev-cli auth set",
+            "TypeSafe API key is not stored; pipe it to: jev-cli auth set",
             3,
         ) from exc
     if not isinstance(value, str) or not value:

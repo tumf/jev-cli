@@ -1,17 +1,31 @@
 # jev-cli
 
-A small, dependency-free command-line client for [TypeSafe Jev](https://docs.typesafe.ai/introduction). It turns text or JSON state into typed `noul`, `choice`, and `score` answers.
+A small, dependency-free CLI for [TypeSafe Jev](https://docs.typesafe.ai/introduction). Send text or JSON state, ask typed questions, and receive machine-readable `noul`, `choice`, or `score` answers.
+
+`jev-cli` is useful when application code needs a fast classification or judgment instead of generated prose.
 
 > This is an independent community project. It is not affiliated with or endorsed by TypeSafe AI.
+
+## Features
+
+- Supports all three Jev primitives: `noul`, `choice`, and `score`
+- Sends multiple questions in one request with `run`
+- Accepts text, JSON, files, and stdin
+- Emits compact JSON by default
+- Can print only the primary value for shell scripts
+- Uses structured stderr errors and meaningful exit codes
+- Has no runtime dependencies outside Python's standard library
 
 ## Requirements
 
 - Python 3.13 or later
+- [uv](https://docs.astral.sh/uv/)
+- GNU Make
 - A TypeSafe API key
 
 ## Install
 
-Clone the repository and install it with [uv](https://docs.astral.sh/uv/) through the Makefile:
+Clone the repository and install the command with `uv tool` through the Makefile. This installs `jev-cli` into uv's executable directory and verifies the installed version.
 
 ```bash
 git clone https://github.com/tumf/jev-cli.git
@@ -19,39 +33,46 @@ cd jev-cli
 make install
 ```
 
-Check the installation:
+Verify that the command is available:
 
 ```bash
 jev-cli --version
 ```
 
+Expected output:
+
+```text
+jev-cli 0.2.0
+```
+
 ## Authentication
 
-`TYPESAFE_API_KEY` takes precedence when it is set:
+The recommended approach for automation is the `TYPESAFE_API_KEY` environment variable. It takes precedence over the credential file.
 
 ```bash
 export TYPESAFE_API_KEY='your-api-key'
-```
-
-Otherwise, save the key in the CLI's private credential file. The directory is created with mode `0700` and the file with mode `0600`.
-
-```bash
-pbpaste | jev-cli auth set
 jev-cli auth status
 ```
 
-The fallback path follows XDG conventions:
+For local use, pipe the key to the private credential store instead. `auth set` does not accept the key as a command-line argument, which keeps it out of process arguments and shell history.
+
+```bash
+printf '%s' 'your-api-key' | jev-cli auth set
+jev-cli auth status
+```
+
+`auth status` reports only whether a key is available. It never prints the key.
+
+The fallback credential path follows XDG conventions:
 
 - `$XDG_CONFIG_HOME/jev-cli/credentials.json` when `XDG_CONFIG_HOME` is set
 - `~/.config/jev-cli/credentials.json` otherwise
 
-The key is never printed by `auth status`.
+The credential directory is created with mode `0700`; the file is written atomically with mode `0600`.
 
-## Usage
+## Quick start
 
-### Yes/no probability
-
-Use `noul` for a focused yes/no judgment. `--value` prints only the probability.
+Ask whether a message expresses urgency. `--value` prints only the resulting probability from `0` to `1`.
 
 ```bash
 jev-cli noul \
@@ -60,9 +81,37 @@ jev-cli noul \
   --value
 ```
 
-### Choose one option
+Example output:
 
-Use `choice` with one or more `KEY=DESCRIPTION` options.
+```text
+0.98
+```
+
+Without `--value`, the command returns the complete API response as JSON, including model and token usage.
+
+```bash
+jev-cli noul \
+  'Does this message express urgency?' \
+  'Please restore service today.' \
+  --pretty
+```
+
+## Question types
+
+### Noul: yes/no probability
+
+Use `noul` for one focused yes/no judgment. The value is the probability that the answer is yes.
+
+```bash
+jev-cli noul \
+  'Does this message request a refund?' \
+  'The integration is broken, but I do not want a refund.' \
+  --value
+```
+
+### Choice: select one option
+
+Use `choice` when the answer must be one of a known set. Each option uses `KEY=DESCRIPTION` syntax.
 
 ```bash
 jev-cli choice \
@@ -74,9 +123,9 @@ jev-cli choice \
   --pretty
 ```
 
-### Score ordered levels
+### Score: evaluate ordered levels
 
-Use `score` with ordered levels. Levels are numbered from zero.
+Use `score` for an ordered scale. Levels are numbered from zero in the order supplied.
 
 ```bash
 jev-cli score \
@@ -88,31 +137,101 @@ jev-cli score \
   --value
 ```
 
-### Read stdin or a file
+## Input formats
 
-Pass `-` or omit the state to read stdin. Prefix a path with `@` to read a file.
+### Standard input
+
+Omit the state or pass `-` to read it from stdin. This is useful for pipelines and avoids putting sensitive input in shell history.
 
 ```bash
-pbpaste | jev-cli noul 'Does this request a refund?' --value
-jev-cli noul 'Does this document mention security risks?' @document.txt --value
+printf '%s' 'Please resolve this today.' | \
+  jev-cli noul 'Does this message express urgency?' --value
 ```
 
-### Structured state
+### File input
 
-Use `--json-state` when the state is JSON.
+Prefix a path with `@` to read its contents.
+
+```bash
+jev-cli noul \
+  'Does this document mention security risks?' \
+  @document.txt \
+  --value
+```
+
+### JSON state
+
+Use `--json-state` to parse the state as JSON. Instructions can refer to named fields.
 
 ```bash
 printf '%s' '{"message":"Please respond today"}' | \
-  jev-cli noul 'Does `message` express urgency?' --json-state --value
+  jev-cli noul \
+  'Does `message` express urgency?' \
+  --json-state \
+  --value
 ```
 
-### Batch questions
+## Batch questions
 
-Use `run` with a complete System One request to evaluate multiple questions in one API call.
+Jev evaluates questions independently against the same state. Use `run` to send a complete System One request and avoid one API call per question.
+
+Create `request.json`:
+
+```json
+{
+  "state": {
+    "message": "The payment integration has failed for three days. Please fix it today."
+  },
+  "model": "jev-latest",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle `message`?",
+      "criteria": {
+        "billing": "Payment, charge, or refund issues",
+        "technical": "Bugs or integration failures",
+        "other": "None of these"
+      }
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": "Does `message` express urgency?"
+    }
+  }
+}
+```
+
+Send it in one request:
 
 ```bash
 jev-cli run request.json --pretty
+```
+
+A request can also be piped through stdin:
+
+```bash
 cat request.json | jev-cli run - --pretty
+```
+
+## Output and automation
+
+The default stdout is one JSON object. Logs and structured errors go to stderr, so stdout can be piped directly into another program.
+
+Use `--value` with `noul`, `choice`, or `score` when a script needs only the primary answer:
+
+```bash
+if awk 'BEGIN { exit !(ARGV[1] >= 0.9) }' \
+  "$(jev-cli noul 'Is this urgent?' 'Restore service today.' --value)"; then
+  echo urgent
+fi
+```
+
+Use `--model` to select another model available to the account:
+
+```bash
+jev-cli noul 'Is this urgent?' 'Restore service today.' \
+  --model jev-latest \
+  --pretty
 ```
 
 ## Exit codes
@@ -122,30 +241,42 @@ cat request.json | jev-cli run - --pretty
 | `0` | Success |
 | `1` | Unexpected API response or other error |
 | `2` | Invalid arguments or input |
-| `3` | Authentication error |
+| `3` | Missing or rejected authentication |
 | `4` | Connection, rate-limit, or transient server error |
 
-Errors are emitted as JSON on stderr.
+An error is emitted as JSON on stderr:
+
+```json
+{"ok": false, "error": "TypeSafe API key is not stored; pipe it to: jev-cli auth set"}
+```
+
+## Scope and limitations
+
+`jev-cli` is a thin client for focused System One judgments. It does not generate prose, perform arithmetic, compare dates, or replace application-level validation. Keep deterministic work in code and use Jev for semantic judgments.
+
+The CLI sends the supplied state and questions to the TypeSafe API. Do not submit data that your organization is not permitted to send to that service.
 
 ## Development
 
-Run the test suite:
-
-```bash
-make test
-```
-
-Build the package:
-
-```bash
-make build
-```
-
-Run both checks:
+Run the full local quality gate before committing:
 
 ```bash
 make check
 ```
+
+Individual targets are also available:
+
+```bash
+make test
+make build
+make install
+```
+
+`make check` runs six unit tests and builds both the wheel and source distribution. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and [SECURITY.md](SECURITY.md) for vulnerability reporting.
+
+## Versioning
+
+The project follows [Semantic Versioning](https://semver.org/). The version source of truth is `project.version` in `pyproject.toml`.
 
 ## License
 

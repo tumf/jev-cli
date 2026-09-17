@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 API_URL = "https://api.typesafe.ai/v1/systemone"
-CREDENTIALS_FILE = Path.home() / ".config" / "jev-cli" / "credentials.json"
+CREDENTIALS_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "jev-cli" / "credentials.json"
 
 
 class CliError(Exception):

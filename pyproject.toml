@@ -2,8 +2,24 @@
 name = "jev-cli"
 version = "0.2.0"
 description = "Small dependency-free CLI for TypeSafe Jev"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.13"
 dependencies = []
+keywords = ["typesafe", "jev", "cli", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/tumf/jev-cli"
+Repository = "https://github.com/tumf/jev-cli"
+Issues = "https://github.com/tumf/jev-cli/issues"
 
 [project.scripts]
 jev-cli = "jev_cli:main"

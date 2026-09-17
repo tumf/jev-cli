@@ -24,6 +24,8 @@ class CliError(Exception):
 
 
 def api_key() -> str:
+    if value := os.environ.get("TYPESAFE_API_KEY"):
+        return value
     try:
         data = json.loads(CREDENTIALS_FILE.read_text())
         value = data["api_key"]

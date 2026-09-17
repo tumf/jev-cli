@@ -2,7 +2,7 @@
 
 miniから[TypeSafe Jev](https://docs.typesafe.ai/introduction)を呼ぶための小さなCLIです。Python標準ライブラリだけで動きます。
 
-APIキーはJev CLI専用の `~/.config/jev/credentials.json` へ保存します。ディレクトリは所有者限定、ファイル権限は `0600` です。dotenvや環境変数には依存しません。
+APIキーは環境変数 `TYPESAFE_API_KEY` を優先します。未設定の場合はJev CLI専用の `~/.config/jev/credentials.json` を読みます。ディレクトリは所有者限定、ファイル権限は `0600` です。dotenvには依存しません。
 
 初回だけ、クリップボードのAPIキーを保存してください。キー自体は画面へ表示されません。
 

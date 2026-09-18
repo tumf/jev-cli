@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,25 @@ from jev_cli import mcp_server
 
 TOOLS = ("choice", "noul", "run", "score")
 SUBPROCESS_TIMEOUT = 60
+README = Path(__file__).resolve().parents[1] / "README.md"
+SHARED_OVERRIDES = ("provider", "model", "endpoint")
+
+
+def readme_run_example() -> dict:
+    """The single documented `run` argument object, read straight out of the README."""
+    blocks = re.findall(r"```json\n(.*?)```", README.read_text(), re.DOTALL)
+    examples = [parsed for block in blocks if "request" in (parsed := json.loads(block))]
+    if len(examples) != 1:
+        raise AssertionError(f"README must document exactly one run request, found {len(examples)}")
+    return examples[0]
+
+
+def resolve(schema: dict, node: dict) -> dict:
+    """Follow one `$ref` into the schema's `$defs` so tests read the published shape, not the pointer."""
+    reference = node.get("$ref")
+    if reference is None:
+        return node
+    return schema["$defs"][reference.removeprefix("#/$defs/")]
 
 
 def server_environment(home: str, **overrides: str) -> dict[str, str]:
@@ -44,6 +64,65 @@ class HttpResponse(io.BytesIO):
 
 class McpStdioTransportTest(unittest.IsolatedAsyncioTestCase):
     """Drive the installed module over a real stdio subprocess through the MCP SDK client."""
+
+    async def published_schemas(self) -> dict[str, dict]:
+        """The input schemas an external agent actually receives from `tools/list`."""
+        with tempfile.TemporaryDirectory() as home:
+            parameters = StdioServerParameters(
+                command=sys.executable,
+                args=["-m", "jev_cli.mcp_server"],
+                env=server_environment(home),
+            )
+            async with Client(parameters) as client:
+                listed = await client.list_tools()
+        return {tool.name: tool.input_schema for tool in listed.tools}
+
+    async def test_every_public_argument_publishes_a_behavioral_description(self):
+        schemas = await self.published_schemas()
+        self.assertEqual(tuple(sorted(schemas)), TOOLS)
+        for name, schema in schemas.items():
+            for argument, published in schema["properties"].items():
+                with self.subTest(tool=name, argument=argument):
+                    description = published.get("description", "")
+                    # A title such as "State" is generated; a description has to explain behavior.
+                    self.assertNotEqual(description, "")
+                    self.assertNotEqual(description.lower(), argument.lower())
+                    self.assertGreater(len(description.split()), 4)
+        for argument in SHARED_OVERRIDES:
+            described = {schema["properties"][argument]["description"] for schema in schemas.values()}
+            self.assertEqual(len(described), 1, f"{argument} is described inconsistently: {described}")
+            self.assertIn("Normally omitted", described.pop())
+
+    async def test_run_publishes_a_structured_and_forward_compatible_request_schema(self):
+        schema = (await self.published_schemas())["run"]
+        request = resolve(schema, schema["properties"]["request"])
+        self.assertEqual(sorted(request["required"]), ["questions", "state"])
+        self.assertEqual(sorted(request["properties"]), ["model", "questions", "state"])
+        self.assertTrue(request["additionalProperties"])
+        question = resolve(schema, request["properties"]["questions"]["additionalProperties"])
+        self.assertEqual(sorted(question["required"]), ["instructions", "type"])
+        self.assertEqual(question["properties"]["type"]["enum"], ["noul", "choice", "score"])
+        self.assertTrue(question["additionalProperties"])
+        criteria = question["properties"]["criteria"]["description"]
+        self.assertIn("choice", criteria)
+        self.assertIn("score", criteria)
+
+    async def test_the_readme_run_example_matches_the_published_request_schema(self):
+        schema = (await self.published_schemas())["run"]
+        example = readme_run_example()
+        self.assertLessEqual(set(schema["required"]), set(example))
+        request = resolve(schema, schema["properties"]["request"])
+        self.assertLessEqual(set(request["required"]), set(example["request"]))
+        self.assertLessEqual(set(example["request"]), set(request["properties"]))
+        question_schema = resolve(schema, request["properties"]["questions"]["additionalProperties"])
+        documented = set()
+        for key, question in example["request"]["questions"].items():
+            with self.subTest(question=key):
+                self.assertLessEqual(set(question_schema["required"]), set(question))
+                self.assertLessEqual(set(question), set(question_schema["properties"]))
+                self.assertIn(question["type"], question_schema["properties"]["type"]["enum"])
+                documented.add(question["type"])
+        self.assertEqual(documented, set(question_schema["properties"]["type"]["enum"]))
 
     async def test_stdio_client_discovers_exactly_the_four_jev_tools(self):
         with tempfile.TemporaryDirectory() as home:
@@ -213,6 +292,34 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["questions"], request["questions"])
         self.assertEqual(payload["model"], "jev-latest")
 
+    async def test_run_forwards_a_typed_multi_question_request_without_field_loss(self):
+        request = {
+            "state": {"message": "The invoice is wrong again and I want a refund."},
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Reply today?"},
+                "team": {
+                    "type": "choice",
+                    "instructions": "Owner?",
+                    "criteria": {"billing": "Money", "support": "Product"},
+                },
+                "anger": {"type": "score", "instructions": "Frustrated?", "criteria": ["Calm", "Angry"]},
+                # Fields this client predates must survive the typed schema untouched.
+                "later": {"type": "noul", "instructions": "?", "unknown_question_field": {"nested": 1}},
+            },
+            "unknown_request_field": [1, 2],
+        }
+        _, call = await self.invoke("run", {"request": request})
+        self.assertEqual(call.call_args.args[0], {**request, "model": "jev-latest"})
+
+    async def test_run_still_accepts_an_empty_questions_map(self):
+        _, call = await self.invoke("run", {"request": {"state": "today", "questions": {}}})
+        self.assertEqual(call.call_args.args[0]["questions"], {})
+
+    async def test_the_readme_run_example_reaches_the_provider_unchanged(self):
+        example = readme_run_example()
+        _, call = await self.invoke("run", example)
+        self.assertEqual(call.call_args.args[0], {**example["request"], "model": "jev-latest"})
+
     async def test_run_preserves_the_request_model_unless_overridden(self):
         request = {"state": "today", "questions": {}, "model": "request-model"}
         _, call = await self.invoke("run", {"request": request})
@@ -276,8 +383,10 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
         cases = (
             ("choice", {"state": "x", "question": "q", "options": {"a": "Bug", "b": ""}}, "non-empty key and description"),
             ("score", {"state": "x", "question": "q", "levels": ["low", ""]}, "non-empty description"),
-            ("run", {"request": {"state": "x"}}, "state and questions"),
-            ("run", {"request": {"questions": {}}}, "state and questions"),
+            # The published request schema rejects a missing member before the tool body runs.
+            ("run", {"request": {"state": "x"}}, "request.questions"),
+            ("run", {"request": {"questions": {}}}, "request.state"),
+            ("run", {"request": {"state": "x", "questions": {"a": {"type": "vibe"}}}}, "questions.a"),
         )
         for name, arguments, message in cases:
             with self.subTest(tool=name, arguments=arguments):

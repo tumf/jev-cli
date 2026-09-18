@@ -291,6 +291,31 @@ cat request.json | jev run - --pretty
 
 `choice` requires at least two options and `score` requires at least two levels; a smaller request is rejected as a tool error before any provider call.
 
+Every argument is described in the published tool schemas, so a host can construct a call without reading this page. `run` takes one complete System One request; its `questions` keys become the answer keys in the response:
+
+```json
+{
+  "request": {
+    "state": {"message": "The invoice is wrong again and I want a refund."},
+    "questions": {
+      "urgent": {"type": "noul", "instructions": "Does this need a reply today?"},
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should own this?",
+        "criteria": {"billing": "Invoice or payment problem", "support": "Product or account problem"}
+      },
+      "anger": {
+        "type": "score",
+        "instructions": "How frustrated is the sender?",
+        "criteria": ["Calm", "Annoyed", "Angry"]
+      }
+    }
+  }
+}
+```
+
+Request members this client does not know are forwarded to the provider unchanged.
+
 Every tool also accepts the optional `provider`, `model`, and `endpoint` arguments. Authentication, provider selection, model defaults, endpoint resolution, and response normalization are the same as for `jev`, including `JEV_PROVIDER` and the credential store, so no separate setup is required.
 
 Add the server to an MCP host with a minimal stdio entry:

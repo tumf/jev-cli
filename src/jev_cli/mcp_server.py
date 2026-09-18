@@ -12,10 +12,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import ConfigDict, Field
 
 from . import (
     PROVIDERS,
@@ -27,6 +28,106 @@ from . import (
 )
 
 Provider = Literal["official", "vercel", "openrouter", "custom"]
+
+State = Annotated[
+    Any,
+    Field(
+        description=(
+            "The text or JSON value to judge. It is sent verbatim, so `-` and `@path` are "
+            "literal strings here, not stdin or a file."
+        )
+    ),
+]
+Question = Annotated[
+    str, Field(description="The decision question to answer about the state.")
+]
+# The three overrides are shared by every tool, so they describe themselves identically.
+ProviderOverride = Annotated[
+    Provider | None,
+    Field(description="Normally omitted; selects one of the CLI-supported providers."),
+]
+ModelOverride = Annotated[
+    str | None,
+    Field(description="Normally omitted; overrides the selected provider's default model."),
+]
+EndpointOverride = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Normally omitted; overrides the selected provider endpoint and is required for "
+            "`custom` when no configured endpoint exists."
+        )
+    ),
+]
+
+
+class QuestionSpec(TypedDict):
+    """One typed question, answered under the key that maps to it."""
+
+    # Unknown members are kept so a request may use System One fields this client predates.
+    __pydantic_config__ = ConfigDict(extra="allow")
+
+    type: Annotated[
+        Literal["noul", "choice", "score"],
+        Field(
+            description=(
+                "The judgment kind: `noul` for a yes/no probability, `choice` for one option "
+                "key, `score` for an ordered level."
+            )
+        ),
+    ]
+    instructions: Annotated[
+        str, Field(description="The decision question to answer about the state.")
+    ]
+    criteria: NotRequired[
+        Annotated[
+            dict[str, str] | list[str],
+            Field(
+                description=(
+                    "Required by `choice` and `score`, omitted by `noul`. For `choice`, at "
+                    "least two option keys mapped to what each key means; the selected key is "
+                    "returned verbatim. For `score`, at least two level descriptions ordered "
+                    "from lowest to highest; the answer is the zero-based position of the "
+                    "selected level."
+                )
+            ),
+        ]
+    ]
+
+
+class RunRequest(TypedDict):
+    """A complete System One request."""
+
+    __pydantic_config__ = ConfigDict(extra="allow")
+
+    state: Annotated[
+        Any,
+        Field(
+            description=(
+                "The text or JSON value every question is answered against. It is sent verbatim."
+            )
+        ),
+    ]
+    questions: Annotated[
+        dict[str, QuestionSpec],
+        Field(
+            description=(
+                "Caller-defined answer keys mapped to question specifications. Each key names "
+                "where that question's answer appears in the response."
+            )
+        ),
+    ]
+    model: NotRequired[
+        Annotated[
+            str,
+            Field(
+                description=(
+                    "Normally omitted; the request model, kept unless the tool `model` argument "
+                    "overrides it and filled with the provider default when absent."
+                )
+            ),
+        ]
+    ]
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +177,11 @@ def judge(
 
 @mcp.tool()
 def noul(
-    state: Any,
-    question: str,
-    provider: Provider | None = None,
-    model: str | None = None,
-    endpoint: str | None = None,
+    state: State,
+    question: Question,
+    provider: ProviderOverride = None,
+    model: ModelOverride = None,
+    endpoint: EndpointOverride = None,
 ) -> dict[str, Any]:
     """Answer one yes/no question about the state with a probability from 0 to 1.
 
@@ -91,12 +192,20 @@ def noul(
 
 @mcp.tool()
 def choice(
-    state: Any,
-    question: str,
-    options: dict[str, str],
-    provider: Provider | None = None,
-    model: str | None = None,
-    endpoint: str | None = None,
+    state: State,
+    question: Question,
+    options: Annotated[
+        dict[str, str],
+        Field(
+            description=(
+                "At least two option keys mapped to what each key means. The selected key is "
+                "returned verbatim as the answer, so the keys are the stable output values."
+            )
+        ),
+    ],
+    provider: ProviderOverride = None,
+    model: ModelOverride = None,
+    endpoint: EndpointOverride = None,
 ) -> dict[str, Any]:
     """Select exactly one option key for the state from a map of at least two key/description pairs.
 
@@ -112,12 +221,20 @@ def choice(
 
 @mcp.tool()
 def score(
-    state: Any,
-    question: str,
-    levels: list[str],
-    provider: Provider | None = None,
-    model: str | None = None,
-    endpoint: str | None = None,
+    state: State,
+    question: Question,
+    levels: Annotated[
+        list[str],
+        Field(
+            description=(
+                "At least two level descriptions ordered from lowest to highest. The answer is "
+                "the zero-based position of the selected level in this list."
+            )
+        ),
+    ],
+    provider: ProviderOverride = None,
+    model: ModelOverride = None,
+    endpoint: EndpointOverride = None,
 ) -> dict[str, Any]:
     """Score the state against at least two ordered levels, numbered from zero in the supplied order.
 
@@ -133,18 +250,24 @@ def score(
 
 @mcp.tool()
 def run(
-    request: dict[str, Any],
-    provider: Provider | None = None,
-    model: str | None = None,
-    endpoint: str | None = None,
+    request: Annotated[
+        RunRequest,
+        Field(
+            description=(
+                "A complete System One request object holding the state and the questions to "
+                "answer. Members this client does not know are forwarded unchanged."
+            )
+        ),
+    ],
+    provider: ProviderOverride = None,
+    model: ModelOverride = None,
+    endpoint: EndpointOverride = None,
 ) -> dict[str, Any]:
     """Send a complete System One request object containing `state` and `questions`.
 
     An explicit `model` overrides the request model; otherwise the request model is kept and
     the provider default is added only when the request omits it.
     """
-    if not isinstance(request, dict) or "state" not in request or "questions" not in request:
-        raise ToolError("request must be an object containing state and questions")
     selected = selected_provider(provider)
     payload = dict(request)
     if model:

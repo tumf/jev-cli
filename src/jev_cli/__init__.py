@@ -151,17 +151,17 @@ def parser() -> argparse.ArgumentParser:
     auth_sub.add_parser("status", help="check whether an API key is stored")
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
-    noul.add_argument("--question", required=True, help="question to answer")
-    noul.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
+    noul.add_argument("-q", "--question", required=True, help="question to answer")
+    noul.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
 
     choice = sub.add_parser("choice", parents=[common], help="choose one option")
-    choice.add_argument("--question", required=True, help="question to answer")
-    choice.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
+    choice.add_argument("-q", "--question", required=True, help="question to answer")
+    choice.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
     choice.add_argument("-o", "--option", action="append", type=split_pair, required=True, metavar="KEY=DESCRIPTION")
 
     score = sub.add_parser("score", parents=[common], help="score against ordered levels")
-    score.add_argument("--question", required=True, help="question to answer")
-    score.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
+    score.add_argument("-q", "--question", required=True, help="question to answer")
+    score.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
     score.add_argument("-l", "--level", action="append", required=True, metavar="DESCRIPTION")
 
     run = sub.add_parser("run", parents=[common], help="send a complete request JSON for batched questions")

@@ -28,6 +28,14 @@ class JevTest(unittest.TestCase):
         self.assertEqual(kind, "choice")
         self.assertEqual(payload["questions"]["answer"]["criteria"], {"tech": "Bug", "sales": "Purchase"})
 
+    def test_short_options_for_question_and_state(self):
+        args = jev.parser().parse_args(["noul", "-q", "Urgent?", "-s", "today", "--value"])
+        payload, kind = jev.request_for(args)
+        self.assertEqual(kind, "noul")
+        self.assertEqual(payload["questions"]["answer"]["instructions"], "Urgent?")
+        self.assertEqual(payload["state"], "today")
+        self.assertTrue(args.value)
+
     def test_json_state_from_stdin(self):
         args = jev.parser().parse_args(
             ["noul", "--question", "Urgent?", "--state", "-", "--json-state"]

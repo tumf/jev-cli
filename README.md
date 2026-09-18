@@ -74,6 +74,8 @@ The credential directory is created with mode `0700`; the file is written atomic
 
 ## Quick start
 
+`--question` and `--state` also accept the short forms `-q` and `-s`. `--value` has no short form.
+
 Ask whether a message expresses urgency. `--value` prints only the resulting probability from `0` to `1`.
 
 ```bash

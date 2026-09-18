@@ -28,6 +28,8 @@ Resolution order:
 
 ## Typed questions
 
+Use `-q` for `--question` and `-s` for `--state` when a shorter command is useful. `--value` has no short form.
+
 Return a yes/no probability from `0` to `1`:
 
 ```bash

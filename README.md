@@ -8,6 +8,14 @@ The `jev` command is useful when application code needs a fast classification or
 
 _Click the thumbnail to watch the 19-second terminal demo._
 
+## Screenshots
+
+![jev-cli overview](assets/jev-cli-overview.png)
+
+![jev-cli terminal judgment result](assets/jev-cli-terminal-result.png)
+
+![jev-cli terminal introduction](assets/jev-cli-intro.png)
+
 > **Unofficial:** This is an independent community project. It is not affiliated with, maintained by, or endorsed by TypeSafe AI.
 
 ## Features

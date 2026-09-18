@@ -1,8 +1,8 @@
 # jev-cli
 
-A small, dependency-free CLI for [TypeSafe Jev](https://docs.typesafe.ai/introduction). Send text or JSON state, ask typed questions, and receive machine-readable `noul`, `choice`, or `score` answers.
+A small CLI and stdio MCP server for [TypeSafe Jev](https://docs.typesafe.ai/introduction). Send text or JSON state, ask typed questions, and receive machine-readable `noul`, `choice`, or `score` answers.
 
-The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose.
+The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose. The `jev-mcp` command exposes the same judgments to MCP hosts over stdio.
 
 > **Unofficial:** This is an independent community project. It is not affiliated with, maintained by, or endorsed by TypeSafe AI.
 
@@ -14,7 +14,7 @@ The `jev` command is useful when application code needs a fast classification or
 - Emits compact JSON by default
 - Can print only the primary value for shell scripts
 - Uses structured stderr errors and meaningful exit codes
-- Has no runtime dependencies outside Python's standard library
+- Ships a stdio MCP server, `jev-mcp`, in the same installation
 
 ## Requirements
 
@@ -25,7 +25,7 @@ The `jev` command is useful when application code needs a fast classification or
 
 ## Install
 
-Install `jev-cli` from PyPI with `uv tool`. This keeps the command in an isolated environment and makes `jev` available on your `PATH`.
+Install `jev-cli` from PyPI with `uv tool`. This keeps the commands in an isolated environment and makes both `jev` and `jev-mcp` available on your `PATH`. There is no optional extra to select; the MCP server is part of the normal installation.
 
 ```bash
 uv tool install jev-cli
@@ -277,6 +277,51 @@ A request can also be piped through stdin:
 ```bash
 cat request.json | jev run - --pretty
 ```
+
+## MCP server
+
+`jev-mcp` is a stdio [MCP](https://modelcontextprotocol.io) server installed alongside `jev`. It exposes four tools that map to the CLI commands:
+
+| Tool | Purpose | Required inputs |
+|---|---|---|
+| `noul` | One yes/no judgment with a probability | `state`, `question` |
+| `choice` | One selection from a typed option map | `state`, `question`, `options` |
+| `score` | One evaluation against ordered levels | `state`, `question`, `levels` |
+| `run` | A complete multi-question System One request | `request` |
+
+Every tool also accepts the optional `provider`, `model`, and `endpoint` arguments. Authentication, provider selection, model defaults, endpoint resolution, and response normalization are the same as for `jev`, including `JEV_PROVIDER` and the credential store, so no separate setup is required.
+
+Add the server to an MCP host with a minimal stdio entry:
+
+```json
+{
+  "mcpServers": {
+    "jev": {
+      "command": "jev-mcp"
+    }
+  }
+}
+```
+
+Pass provider configuration through the host's environment block when the default is not wanted:
+
+```json
+{
+  "mcpServers": {
+    "jev": {
+      "command": "jev-mcp",
+      "env": {
+        "JEV_PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+`state` is sent verbatim over MCP. Unlike the CLI, `-` does not read stdin and a leading `@` does not read a file, because stdin carries the MCP protocol frames. Read a file in the host and pass its content as `state`.
+
+Invalid input and provider failures are returned as MCP tool errors and never include the API key. stdout carries MCP protocol frames only; diagnostics go to stderr.
 
 ## Output and automation
 

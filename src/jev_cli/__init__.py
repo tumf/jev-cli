@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small, dependency-free CLI for TypeSafe Jev."""
+"""Small CLI and stdio MCP server for TypeSafe Jev."""
 
 from __future__ import annotations
 
@@ -323,22 +323,28 @@ def parser() -> argparse.ArgumentParser:
     return root
 
 
+def question_request(kind: str, state: Any, question: str, criteria: Any, model: str) -> dict[str, Any]:
+    """Build a single-question System One request shared by the CLI and the MCP server."""
+    specification: dict[str, Any] = {"type": kind, "instructions": question}
+    if criteria is not None:
+        specification["criteria"] = criteria
+    return {"state": state, "model": model, "questions": {"answer": specification}}
+
+
 def request_for(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
     if args.command == "run":
         payload = load_request(args.request)
         payload.setdefault("model", args.model or provider_model(args.provider))
         return payload, None
 
-    question: dict[str, Any] = {"type": args.command, "instructions": args.question}
-    if args.command == "choice":
-        question["criteria"] = dict(args.option)
-    elif args.command == "score":
-        question["criteria"] = args.level
-    payload = {
-        "state": state_value(args.state, args.json_state),
-        "model": args.model or provider_model(args.provider),
-        "questions": {"answer": question},
-    }
+    criteria = dict(args.option) if args.command == "choice" else args.level if args.command == "score" else None
+    payload = question_request(
+        args.command,
+        state_value(args.state, args.json_state),
+        args.question,
+        criteria,
+        args.model or provider_model(args.provider),
+    )
     return payload, args.command
 
 

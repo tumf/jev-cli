@@ -1,13 +1,13 @@
 [project]
 name = "jev-cli"
 version = "0.5.0"
-description = "Small dependency-free CLI for TypeSafe Jev"
+description = "Small CLI and stdio MCP server for TypeSafe Jev"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.13"
-dependencies = []
-keywords = ["typesafe", "jev", "cli", "ai"]
+dependencies = ["mcp>=2.2.0,<3"]
+keywords = ["typesafe", "jev", "cli", "mcp", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",
@@ -23,6 +23,7 @@ Issues = "https://github.com/tumf/jev-cli/issues"
 
 [project.scripts]
 jev = "jev_cli:main"
+jev-mcp = "jev_cli.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.8.15,<0.9.0"]

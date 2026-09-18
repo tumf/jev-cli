@@ -1,4 +1,4 @@
-# CLI reference
+# CLI and MCP reference
 
 ## Authentication
 
@@ -145,6 +145,49 @@ jev noul --question 'Does this require action?' --state 'Please investigate.' --
 | `4` | Retryable network, rate-limit, or server failure |
 
 Read stderr as JSON on failure. Do not interpret a nonzero exit as a model answer.
+
+## MCP server
+
+`jev-mcp` is a stdio MCP server installed by the same package; no optional extra is required. It exposes four tools that mirror the CLI commands:
+
+| Tool | Purpose | Required inputs |
+|---|---|---|
+| `noul` | One yes/no judgment with a probability | `state`, `question` |
+| `choice` | One selection from a typed option map | `state`, `question`, `options` |
+| `score` | One evaluation against ordered levels | `state`, `question`, `levels` |
+| `run` | A complete multi-question System One request | `request` |
+
+Each tool also accepts optional `provider`, `model`, and `endpoint` arguments. Provider selection, model defaults, endpoint resolution, credential lookup, and response normalization are identical to the CLI, so `JEV_PROVIDER`, the provider environment variables, and the credential store all apply unchanged.
+
+Minimal stdio host configuration:
+
+```json
+{
+  "mcpServers": {
+    "jev": {
+      "command": "jev-mcp"
+    }
+  }
+}
+```
+
+Select a non-default provider through the host's environment block:
+
+```json
+{
+  "mcpServers": {
+    "jev": {
+      "command": "jev-mcp",
+      "env": {
+        "JEV_PROVIDER": "openrouter",
+        "OPENROUTER_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+`state` is sent verbatim. `-` does not read stdin and a leading `@` does not read a file, because stdin carries the MCP protocol frames. Invalid input and provider failures return MCP tool errors without the API key, and stdout carries protocol frames only.
 
 ## Installation
 

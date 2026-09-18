@@ -289,6 +289,8 @@ cat request.json | jev run - --pretty
 | `score` | One evaluation against ordered levels | `state`, `question`, `levels` |
 | `run` | A complete multi-question System One request | `request` |
 
+`choice` requires at least two options and `score` requires at least two levels; a smaller request is rejected as a tool error before any provider call.
+
 Every tool also accepts the optional `provider`, `model`, and `endpoint` arguments. Authentication, provider selection, model defaults, endpoint resolution, and response normalization are the same as for `jev`, including `JEV_PROVIDER` and the credential store, so no separate setup is required.
 
 Add the server to an MCP host with a minimal stdio entry:

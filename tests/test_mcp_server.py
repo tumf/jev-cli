@@ -274,9 +274,7 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_structured_input_fails_before_any_provider_access(self):
         cases = (
-            ("choice", {"state": "x", "question": "q", "options": {}}, "non-empty options map"),
-            ("choice", {"state": "x", "question": "q", "options": {"a": ""}}, "non-empty key and description"),
-            ("score", {"state": "x", "question": "q", "levels": []}, "non-empty levels list"),
+            ("choice", {"state": "x", "question": "q", "options": {"a": "Bug", "b": ""}}, "non-empty key and description"),
             ("score", {"state": "x", "question": "q", "levels": ["low", ""]}, "non-empty description"),
             ("run", {"request": {"state": "x"}}, "state and questions"),
             ("run", {"request": {"questions": {}}}, "state and questions"),
@@ -288,6 +286,36 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(result.is_error)
                 self.assertIn(message, result.content[0].text)
                 call.assert_not_called()
+
+    async def test_fewer_than_two_entries_fails_before_any_provider_access(self):
+        cases = (
+            ("choice", {}, "options map with at least two entries"),
+            ("choice", {"tech": "Bug"}, "options map with at least two entries"),
+            ("score", [], "levels list with at least two entries"),
+            ("score", ["Calm"], "levels list with at least two entries"),
+        )
+        for name, criteria, message in cases:
+            argument = "options" if name == "choice" else "levels"
+            with self.subTest(tool=name, criteria=criteria):
+                with patch.object(mcp_server, "call") as call:
+                    result = await self.call_tool(
+                        name, {"state": "x", "question": "q", argument: criteria}
+                    )
+                self.assertTrue(result.is_error)
+                self.assertIn(message, result.content[0].text)
+                call.assert_not_called()
+
+    async def test_two_entries_reach_the_provider_with_the_criteria_preserved(self):
+        options = {"tech": "Bug", "sales": "Purchase"}
+        _, call = await self.invoke(
+            "choice", {"state": "broken", "question": "Route?", "options": options}
+        )
+        self.assertEqual(call.call_args.args[0]["questions"]["answer"]["criteria"], options)
+        levels = ["Calm", "Angry"]
+        _, call = await self.invoke(
+            "score", {"state": "Third failure.", "question": "Frustrated?", "levels": levels}
+        )
+        self.assertEqual(call.call_args.args[0]["questions"]["answer"]["criteria"], levels)
 
     async def test_cli_error_reaches_the_client_as_a_bounded_tool_error(self):
         with patch.object(mcp_server, "call", side_effect=jev.CliError("API HTTP 401: bad key", 3)):

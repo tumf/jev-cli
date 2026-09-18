@@ -185,13 +185,12 @@ class McpStdioFramingTest(unittest.TestCase):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 env=server_environment(home),
             )
             watchdog = threading.Timer(SUBPROCESS_TIMEOUT, process.kill)
             watchdog.start()
             try:
-                process.stdin.write("".join(json.dumps(frame) + "\n" for frame in frames))
+                process.stdin.write("".join(json.dumps(frame) + "\n" for frame in frames).encode())
                 process.stdin.flush()
                 lines = [process.stdout.readline() for _ in range(3)]
             finally:
@@ -199,11 +198,11 @@ class McpStdioFramingTest(unittest.TestCase):
                 process.stdin.close()
                 process.wait(timeout=SUBPROCESS_TIMEOUT)
                 process.stdout.close()
-                stderr = process.stderr.read()
+                stderr = process.stderr.read().decode(errors="replace")
                 process.stderr.close()
         responses = []
         for line in lines:
-            self.assertTrue(line.endswith("\n"), f"truncated stdout line: {line!r}")
+            self.assertTrue(line.endswith(b"\n"), f"truncated stdout line: {line!r}")
             frame = json.loads(line)
             self.assertEqual(frame["jsonrpc"], "2.0")
             responses.append(frame)
@@ -219,14 +218,13 @@ class McpStdioFramingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             completed = subprocess.run(
                 [sys.executable, "-m", "jev_cli.mcp_server"],
-                stdin=subprocess.DEVNULL,
+                input=b"",
                 capture_output=True,
-                text=True,
                 timeout=SUBPROCESS_TIMEOUT,
                 env=server_environment(home),
             )
-        self.assertEqual(completed.returncode, 0)
-        self.assertEqual(completed.stdout, "")
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
+        self.assertEqual(completed.stdout, b"")
 
 
 class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):

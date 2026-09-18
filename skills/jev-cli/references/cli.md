@@ -28,9 +28,34 @@ printf '%s' "$TYPESAFE_API_KEY" | jev auth set
 
 Resolution order:
 
-1. `TYPESAFE_API_KEY`
+1. The selected provider's environment variable: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, or `JEV_API_KEY`
 2. `$XDG_CONFIG_HOME/jev-cli/credentials.json`
 3. `~/.config/jev-cli/credentials.json`
+
+The official TypeSafe API is selected by default. Vercel AI Gateway and OpenRouter can be selected per command:
+
+```bash
+jev auth set --provider vercel
+jev auth test --provider vercel
+jev noul --provider vercel -q 'Is this urgent?' -s 'Restore service today.' --value
+
+jev auth set --provider openrouter
+jev auth test --provider openrouter
+jev noul --provider openrouter -q 'Is this urgent?' -s 'Restore service today.' --value
+```
+
+`JEV_PROVIDER` changes the default for evaluation commands. Authentication commands require an explicit `--provider` so credentials are not accidentally stored or tested against the wrong service.
+
+For a proxy implementing the native Jev contract:
+
+```bash
+JEV_PROVIDER=custom \
+JEV_ENDPOINT='https://proxy.example.com/v1/systemone' \
+JEV_API_KEY='your-proxy-api-key' \
+jev noul -q 'Is this urgent?' -s 'Restore service today.' --value
+```
+
+Set `JEV_MODEL` or pass `--model` when the proxy requires a different model name. Use only a trusted HTTPS endpoint because the custom bearer key is sent to it.
 
 ## Typed questions
 

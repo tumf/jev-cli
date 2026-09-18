@@ -15,7 +15,29 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-API_URL = "https://api.typesafe.ai/v1/systemone"
+PROVIDERS = {
+    "official": {
+        "endpoint": "https://api.typesafe.ai/v1/systemone",
+        "key_env": "TYPESAFE_API_KEY",
+        "model": "jev-latest",
+    },
+    "vercel": {
+        "endpoint": "https://ai-gateway.vercel.sh/v4/ai/evaluation-model",
+        "key_env": "AI_GATEWAY_API_KEY",
+        "model": "typesafe-ai/jev",
+    },
+    "openrouter": {
+        "endpoint": "https://openrouter.ai/api/alpha/decisions",
+        "key_env": "OPENROUTER_API_KEY",
+        "model": "typesafe/jev-1.13",
+    },
+    "custom": {
+        "endpoint": None,
+        "key_env": "JEV_API_KEY",
+        "model": "jev-latest",
+    },
+}
+API_URL = PROVIDERS["official"]["endpoint"]
 CREDENTIALS_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "jev-cli" / "credentials.json"
 BUNDLED_SKILLS = Path(__file__).with_name("bundled_skills")
 INSTALL_MARKER = ".jev-cli-managed"
@@ -27,31 +49,52 @@ class CliError(Exception):
         self.exit_code = exit_code
 
 
-def api_key() -> str:
-    if value := os.environ.get("TYPESAFE_API_KEY"):
+def api_key(provider: str = "official") -> str:
+    config = PROVIDERS[provider]
+    if value := os.environ.get(config["key_env"]):
         return value
     try:
         data = json.loads(CREDENTIALS_FILE.read_text())
-        value = data["api_key"]
+        providers = data.get("providers", {})
+        if not isinstance(providers, dict):
+            raise TypeError("providers must be an object")
+        value = providers.get(provider)
+        if value is None and provider == "official":
+            value = data["api_key"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CliError(
-            "TypeSafe API key is not stored; run: jev auth set",
+            f"{provider} API key is not stored; run: jev auth set --provider {provider}",
             3,
         ) from exc
     if not isinstance(value, str) or not value:
-        raise CliError("stored TypeSafe API key is empty", 3)
+        raise CliError(f"stored {provider} API key is empty", 3)
     return value
 
 
-def set_api_key() -> None:
-    value = getpass.getpass("TypeSafe API key: ").strip() if sys.stdin.isatty() else sys.stdin.read().strip()
+def set_api_key(provider: str = "official") -> None:
+    label = "TypeSafe" if provider == "official" else provider
+    value = getpass.getpass(f"{label} API key: ").strip() if sys.stdin.isatty() else sys.stdin.read().strip()
     if not value:
         raise CliError("API key is empty")
     CREDENTIALS_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
+        data = json.loads(CREDENTIALS_FILE.read_text())
+    except FileNotFoundError:
+        data = {}
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CliError("stored credential file is invalid; refusing to overwrite it", 3) from exc
+    if not isinstance(data, dict):
+        raise CliError("stored credential file must contain an object", 3)
+    providers = data.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        raise CliError("stored credential file has an invalid providers object", 3)
+    if old_key := data.pop("api_key", None):
+        providers.setdefault("official", old_key)
+    providers[provider] = value
+    try:
         fd, temporary = tempfile.mkstemp(dir=CREDENTIALS_FILE.parent)
         with os.fdopen(fd, "w") as file:
-            json.dump({"api_key": value}, file)
+            json.dump(data, file)
             file.write("\n")
         os.chmod(temporary, 0o600)
         os.replace(temporary, CREDENTIALS_FILE)
@@ -137,14 +180,69 @@ def load_request(path: str) -> dict[str, Any]:
     return payload
 
 
-def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
+def provider_request(payload: dict[str, Any], provider: str) -> tuple[dict[str, Any], dict[str, str]]:
+    payload = dict(payload)
+    headers: dict[str, str] = {}
+    if provider == "vercel":
+        payload["questions"] = {
+            name: {**question, "type": "boolean" if question.get("type") == "noul" else question.get("type")}
+            for name, question in payload["questions"].items()
+        }
+        headers = {
+            "ai-gateway-protocol-version": "0.0.1",
+            "ai-gateway-auth-method": "api-key",
+            "ai-evaluation-model-specification-version": "4",
+            "ai-model-id": payload.pop("model"),
+        }
+    return payload, headers
+
+
+def normalize_response(result: dict[str, Any], provider: str) -> dict[str, Any]:
+    if provider != "vercel":
+        return result
+    result = dict(result)
+    result["answers"] = {
+        name: (
+            {"noul": answer["probability"], **{k: v for k, v in answer.items() if k not in ("type", "probability")}}
+            if answer.get("type") == "boolean"
+            else {k: v for k, v in answer.items() if k != "type"}
+        )
+        for name, answer in result["answers"].items()
+    }
+    return result
+
+
+def provider_endpoint(provider: str, override: str | None = None) -> str:
+    if override:
+        return override
+    if provider == "custom":
+        if endpoint := os.environ.get("JEV_ENDPOINT"):
+            return endpoint
+        raise CliError("custom provider requires JEV_ENDPOINT or --endpoint", 2)
+    if provider == "official" and (legacy := os.environ.get("TYPESAFE_API_URL")):
+        return legacy
+    endpoint = PROVIDERS[provider]["endpoint"]
+    if not isinstance(endpoint, str):
+        raise CliError(f"{provider} provider endpoint is not configured", 2)
+    return endpoint
+
+
+def provider_model(provider: str) -> str:
+    if provider == "custom":
+        return os.environ.get("JEV_MODEL", PROVIDERS[provider]["model"])
+    return PROVIDERS[provider]["model"]
+
+
+def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> dict[str, Any]:
+    payload, provider_headers = provider_request(payload, provider)
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload, ensure_ascii=False).encode(),
         headers={
-            "Authorization": f"Bearer {api_key()}",
+            "Authorization": f"Bearer {api_key(provider)}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.4.1",
+            "User-Agent": "jev-cli/0.5.0",
+            **provider_headers,
         },
         method="POST",
     )
@@ -163,16 +261,23 @@ def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
         raise CliError(f"API connection failed: {exc}", 4) from exc
     if not isinstance(result, dict):
         raise CliError("API returned a non-object response", 1)
-    return result
+    return normalize_response(result, provider)
 
 
 def common_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--model", default="jev-latest", help="model name (default: jev-latest)")
+    default_provider = os.environ.get("JEV_PROVIDER", "official")
+    parser.add_argument(
+        "--provider",
+        choices=PROVIDERS,
+        default=default_provider,
+        help="API provider (default: official)",
+    )
+    parser.add_argument("--model", help="model name (default depends on provider)")
     parser.add_argument("--json-state", action="store_true", help="parse state as JSON")
     parser.add_argument("--pretty", action="store_true", help="pretty-print JSON")
     parser.add_argument("--value", action="store_true", help="print only the primary answer value")
-    parser.add_argument("--endpoint", default=os.environ.get("TYPESAFE_API_URL", API_URL), help=argparse.SUPPRESS)
+    parser.add_argument("--endpoint", help=argparse.SUPPRESS)
     return parser
 
 
@@ -181,15 +286,19 @@ def parser() -> argparse.ArgumentParser:
         prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.4.1")
+    root.add_argument("--version", action="version", version="jev 0.5.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 
     auth = sub.add_parser("auth", help="manage the API key in the Jev credential store")
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
-    auth_sub.add_parser("set", help="store an API key from a hidden prompt or stdin")
-    auth_sub.add_parser("status", help="check whether an API key is stored")
-    auth_sub.add_parser("test", help="connect to Jev and verify the API key")
+    for name, help_text in (
+        ("set", "store an API key from a hidden prompt or stdin"),
+        ("status", "check whether an API key is stored"),
+        ("test", "connect to Jev and verify the API key"),
+    ):
+        auth_command = auth_sub.add_parser(name, help=help_text)
+        auth_command.add_argument("--provider", choices=PROVIDERS, default="official")
 
     skills = sub.add_parser("install-skills", help="install bundled agent skills")
     skills.add_argument("-g", "--global", dest="global_install", action="store_true", help="install in the user home")
@@ -217,7 +326,7 @@ def parser() -> argparse.ArgumentParser:
 def request_for(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
     if args.command == "run":
         payload = load_request(args.request)
-        payload.setdefault("model", args.model)
+        payload.setdefault("model", args.model or provider_model(args.provider))
         return payload, None
 
     question: dict[str, Any] = {"type": args.command, "instructions": args.question}
@@ -227,7 +336,7 @@ def request_for(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
         question["criteria"] = args.level
     payload = {
         "state": state_value(args.state, args.json_state),
-        "model": args.model,
+        "model": args.model or provider_model(args.provider),
         "questions": {"answer": question},
     }
     return payload, args.command
@@ -245,13 +354,13 @@ def main() -> int:
         args = parser().parse_args()
         if args.command == "auth":
             if args.auth_command == "set":
-                set_api_key()
+                set_api_key(args.provider)
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
             elif args.auth_command == "test":
                 result = call(
                     {
                         "state": "authentication test",
-                        "model": "jev-latest",
+                        "model": provider_model(args.provider),
                         "questions": {
                             "answer": {
                                 "type": "noul",
@@ -259,18 +368,21 @@ def main() -> int:
                             }
                         },
                     },
-                    API_URL,
+                    provider_endpoint(args.provider),
+                    args.provider,
                 )
                 print(json.dumps({"ok": True, "valid": True, "model": result.get("model")}))
             else:
-                api_key()
+                api_key(args.provider)
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
             return 0
         if args.command == "install-skills":
             print(json.dumps(install_skills(global_install=args.global_install, claude=args.claude)))
             return 0
+        if args.provider not in PROVIDERS:
+            raise CliError(f"invalid JEV_PROVIDER: {args.provider}")
         payload, kind = request_for(args)
-        result = call(payload, args.endpoint)
+        result = call(payload, provider_endpoint(args.provider, args.endpoint), args.provider)
         if args.value:
             print(primary_value(result, kind))
         else:

@@ -19,7 +19,7 @@ The `jev` command is useful when application code needs a fast classification or
 ## Requirements
 
 - [uv](https://docs.astral.sh/uv/)
-- A TypeSafe API key
+- An API key for the provider you use. The official TypeSafe API is the default.
 
 `uv` installs a compatible Python 3.13 or later interpreter when needed.
 
@@ -40,12 +40,12 @@ jev --version
 Expected output:
 
 ```text
-jev 0.4.1
+jev 0.5.0
 ```
 
 ## Authentication
 
-The recommended approach for automation is the `TYPESAFE_API_KEY` environment variable. It takes precedence over the credential file.
+The official TypeSafe API is the default provider. The recommended approach for automation is the `TYPESAFE_API_KEY` environment variable. It takes precedence over the credential file.
 
 ```bash
 export TYPESAFE_API_KEY='your-api-key'
@@ -59,6 +59,50 @@ jev auth set
 jev auth status
 jev auth test
 ```
+
+Jev is also available through Vercel AI Gateway and OpenRouter. Select a provider per command with `--provider`, or set `JEV_PROVIDER` for the process. Each provider uses its own API key and default model.
+
+| Provider | Option | API key environment variable | Default model |
+|---|---|---|---|
+| TypeSafe official | `official` | `TYPESAFE_API_KEY` | `jev-latest` |
+| Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` | `typesafe-ai/jev` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `typesafe/jev-1.13` |
+| Jev-compatible proxy | `custom` | `JEV_API_KEY` | `JEV_MODEL` or `jev-latest` |
+
+Store and test a provider-specific key without exposing it in shell history:
+
+```bash
+jev auth set --provider vercel
+jev auth test --provider vercel
+
+jev auth set --provider openrouter
+jev auth test --provider openrouter
+```
+
+Run the same judgment through another provider:
+
+```bash
+jev noul \
+  --provider openrouter \
+  --question 'Does this message express urgency?' \
+  --state 'Please restore service today.' \
+  --value
+```
+
+Omitting `--provider` continues to use the official TypeSafe API. `--model` can override the provider's default model.
+
+For a proxy that implements the native Jev request and response contract, select `custom` and configure its endpoint separately. This keeps proxy credentials isolated from the built-in providers.
+
+```bash
+export JEV_PROVIDER=custom
+export JEV_ENDPOINT='https://proxy.example.com/v1/systemone'
+export JEV_API_KEY='your-proxy-api-key'
+export JEV_MODEL='jev-latest' # optional
+
+jev noul -q 'Is this urgent?' -s 'Restore service today.' --value
+```
+
+`--endpoint` can replace `JEV_ENDPOINT` for one command. The CLI sends `JEV_API_KEY` to that endpoint as a bearer token, so use only a trusted HTTPS endpoint.
 
 For non-interactive automation, piping the key to `jev auth set` remains supported.
 
@@ -275,7 +319,7 @@ An error is emitted as JSON on stderr:
 
 The `jev` command is a thin client for focused System One judgments. It does not generate prose, perform arithmetic, compare dates, or replace application-level validation. Keep deterministic work in code and use Jev for semantic judgments.
 
-The CLI sends the supplied state and questions to the TypeSafe API. Do not submit data that your organization is not permitted to send to that service.
+The CLI sends the supplied state and questions to the selected provider. Do not submit data that your organization is not permitted to send to that service.
 
 ## License
 

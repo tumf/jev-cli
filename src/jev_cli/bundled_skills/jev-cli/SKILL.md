@@ -23,13 +23,13 @@ Install this bundled skill with `jev install-skills`. Add `--global` for the use
 ## Workflow
 
 1. Confirm the command is installed with `jev --version`. If it is missing, install from the repository root with `make install`. Completion: `jev --version` exits successfully.
-2. Confirm key availability with `jev auth status`, then use `jev auth test` when API validity must be verified. If absent or invalid, ask the user to configure a TypeSafe API key; never print, infer, or commit it. Completion: the selected command returns `ok: true`.
+2. Confirm key availability with `jev auth status`, then use `jev auth test` when API validity must be verified. If absent or invalid, ask the user to configure the selected provider's API key; never print, infer, or commit it. Completion: the selected command returns `ok: true`.
 3. Choose the narrowest question type:
    - `noul` for a yes/no probability.
    - `choice` for one key from explicit options.
    - `score` for an ordered numeric level.
    - `run` for a complete request object or multiple questions.
-4. Send only the state needed for the judgment. TypeSafe receives the submitted state and questions, so do not send secrets or private data without explicit authorization.
+4. Send only the state needed for the judgment. The selected provider receives the submitted state and questions, so do not send secrets or private data without explicit authorization.
 5. Use default JSON output for automation. Use `--value` only when a scalar is sufficient. Completion: parse the result and account for the exit code before acting on it.
 
 Read [references/cli.md](references/cli.md) for copy-paste command forms, inputs, output controls, and exit codes.
@@ -40,7 +40,8 @@ Read [references/cli.md](references/cli.md) for copy-paste command forms, inputs
 - Give `score` levels in ascending order; the returned number may be fractional.
 - Use `--json-state` only when the state must retain JSON structure.
 - Use `@file` or stdin for long input instead of embedding it in shell arguments.
-- Set `TYPESAFE_API_KEY` only for process-level overrides. The normal credential store remains under the user's config directory.
+- The official TypeSafe API is the default. Use `--provider vercel`, `--provider openrouter`, or `--provider custom` only when the caller selects another provider.
+- Use the provider-specific environment variable only for process-level overrides: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, or `JEV_API_KEY`. A custom provider also requires `JEV_ENDPOINT`; `JEV_MODEL` is optional. The normal credential store remains under the user's config directory.
 - Treat model output as a structured judgment, not verified fact. Keep consequential actions behind the caller's own validation and authorization rules.
 
 ## Common pitfalls

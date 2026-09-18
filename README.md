@@ -59,11 +59,12 @@ For local use, enter the key at the hidden prompt. `auth set` does not accept th
 ```bash
 jev auth set
 jev auth status
+jev auth test
 ```
 
 For non-interactive automation, piping the key to `jev auth set` remains supported.
 
-`auth status` reports only whether a key is available. It never prints the key.
+`auth status` reports only whether a key is available. `auth test` sends a minimal request to Jev and verifies that the key is accepted. Neither command prints the key.
 
 The fallback credential path follows XDG conventions:
 

@@ -11,6 +11,29 @@ import jev_cli as jev
 
 
 class JevTest(unittest.TestCase):
+    def test_auth_test_calls_api_and_reports_valid_key(self):
+        argv = ["jev", "auth", "test"]
+        response = {"model": "jev-1.13.0", "answers": {"answer": {"noul": 1.0}}}
+        with patch("sys.argv", argv), patch.object(jev, "call", return_value=response) as call, patch(
+            "sys.stdout", new_callable=io.StringIO
+        ) as stdout:
+            self.assertEqual(jev.main(), 0)
+        payload, endpoint = call.call_args.args
+        self.assertEqual(endpoint, jev.API_URL)
+        self.assertEqual(payload["questions"]["answer"]["type"], "noul")
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"ok": True, "valid": True, "model": "jev-1.13.0"},
+        )
+
+    def test_auth_test_preserves_authentication_failure(self):
+        argv = ["jev", "auth", "test"]
+        with patch("sys.argv", argv), patch.object(
+            jev, "call", side_effect=jev.CliError("API HTTP 401", 3)
+        ), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(jev.main(), 3)
+        self.assertFalse(json.loads(stderr.getvalue())["ok"])
+
     def test_install_skills_target_matrix(self):
         import tempfile
 

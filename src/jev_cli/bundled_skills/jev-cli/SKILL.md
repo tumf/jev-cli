@@ -23,7 +23,7 @@ Install this bundled skill with `jev install-skills`. Add `--global` for the use
 ## Workflow
 
 1. Confirm the command is installed with `jev --version`. If it is missing, install from the repository root with `make install`. Completion: `jev --version` exits successfully.
-2. Confirm authentication with `jev auth status`. If absent, ask the user to provide or configure a TypeSafe API key; never print, infer, or commit it. Completion: the status command returns `ok: true`.
+2. Confirm key availability with `jev auth status`, then use `jev auth test` when API validity must be verified. If absent or invalid, ask the user to configure a TypeSafe API key; never print, infer, or commit it. Completion: the selected command returns `ok: true`.
 3. Choose the narrowest question type:
    - `noul` for a yes/no probability.
    - `choice` for one key from explicit options.
@@ -54,7 +54,7 @@ Read [references/cli.md](references/cli.md) for copy-paste command forms, inputs
 ## Verification checklist
 
 - [ ] `jev --version` succeeds.
-- [ ] `jev auth status` succeeds without exposing the key.
+- [ ] `jev auth status` or `jev auth test` succeeds without exposing the key.
 - [ ] The selected question type matches the desired answer shape.
 - [ ] Submitted state contains no unauthorized secret or private data.
 - [ ] The caller handles JSON and nonzero exit codes.

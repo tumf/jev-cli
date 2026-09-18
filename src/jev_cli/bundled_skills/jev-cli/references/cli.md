@@ -8,6 +8,12 @@ Check whether authentication is available without printing the key:
 jev auth status
 ```
 
+Connect to Jev and verify that the resolved API key is accepted:
+
+```bash
+jev auth test
+```
+
 In a terminal, enter the API key at the hidden prompt:
 
 ```bash

@@ -144,7 +144,7 @@ def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
         headers={
             "Authorization": f"Bearer {api_key()}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.4.0",
+            "User-Agent": "jev-cli/0.4.1",
         },
         method="POST",
     )
@@ -181,7 +181,7 @@ def parser() -> argparse.ArgumentParser:
         prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.4.0")
+    root.add_argument("--version", action="version", version="jev 0.4.1")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 
@@ -189,6 +189,7 @@ def parser() -> argparse.ArgumentParser:
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
     auth_sub.add_parser("set", help="store an API key from a hidden prompt or stdin")
     auth_sub.add_parser("status", help="check whether an API key is stored")
+    auth_sub.add_parser("test", help="connect to Jev and verify the API key")
 
     skills = sub.add_parser("install-skills", help="install bundled agent skills")
     skills.add_argument("-g", "--global", dest="global_install", action="store_true", help="install in the user home")
@@ -246,6 +247,21 @@ def main() -> int:
             if args.auth_command == "set":
                 set_api_key()
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
+            elif args.auth_command == "test":
+                result = call(
+                    {
+                        "state": "authentication test",
+                        "model": "jev-latest",
+                        "questions": {
+                            "answer": {
+                                "type": "noul",
+                                "instructions": "Is this an authentication test?",
+                            }
+                        },
+                    },
+                    API_URL,
+                )
+                print(json.dumps({"ok": True, "valid": True, "model": result.get("model")}))
             else:
                 api_key()
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))

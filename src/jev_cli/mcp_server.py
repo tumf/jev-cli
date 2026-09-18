@@ -98,12 +98,13 @@ def choice(
     model: str | None = None,
     endpoint: str | None = None,
 ) -> dict[str, Any]:
-    """Select exactly one option key for the state from a non-empty map of key to description.
+    """Select exactly one option key for the state from a map of at least two key/description pairs.
 
     The state is sent verbatim; `-` and `@path` are literal strings here, not stdin or a file.
     """
-    if not options:
-        raise ToolError("choice requires a non-empty options map")
+    # A single option is not a choice, so the minimum useful cardinality is two.
+    if len(options) < 2:
+        raise ToolError("choice requires an options map with at least two entries")
     if any(not key or not description for key, description in options.items()):
         raise ToolError("choice options require a non-empty key and description")
     return judge("choice", state, question, options, provider, model, endpoint)
@@ -118,12 +119,13 @@ def score(
     model: str | None = None,
     endpoint: str | None = None,
 ) -> dict[str, Any]:
-    """Score the state against ordered levels, numbered from zero in the supplied order.
+    """Score the state against at least two ordered levels, numbered from zero in the supplied order.
 
     The state is sent verbatim; `-` and `@path` are literal strings here, not stdin or a file.
     """
-    if not levels:
-        raise ToolError("score requires a non-empty levels list")
+    # A single level is not a scale, so the minimum useful cardinality is two.
+    if len(levels) < 2:
+        raise ToolError("score requires a levels list with at least two entries")
     if any(not level for level in levels):
         raise ToolError("score levels require a non-empty description")
     return judge("score", state, question, levels, provider, model, endpoint)

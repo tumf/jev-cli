@@ -18,19 +18,17 @@ The `jev` command is useful when application code needs a fast classification or
 
 ## Requirements
 
-- Python 3.13 or later
 - [uv](https://docs.astral.sh/uv/)
-- GNU Make
 - A TypeSafe API key
+
+`uv` installs a compatible Python 3.13 or later interpreter when needed.
 
 ## Install
 
-Clone the repository and install the command with `uv tool` through the Makefile. This installs `jev` into uv's executable directory and verifies the installed version.
+Install `jev-cli` from PyPI with `uv tool`. This keeps the command in an isolated environment and makes `jev` available on your `PATH`.
 
 ```bash
-git clone https://github.com/tumf/jev-cli.git
-cd jev-cli
-make install
+uv tool install jev-cli
 ```
 
 Verify that the command is available:

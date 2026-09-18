@@ -4,6 +4,10 @@ A small CLI and stdio MCP server for [TypeSafe Jev](https://docs.typesafe.ai/int
 
 The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose. The `jev-mcp` command exposes the same judgments to MCP hosts over stdio.
 
+[![Watch the jev-cli terminal demo](assets/jev-cli-thumbnail.png)](assets/jev-cli-terminal-demo.mp4)
+
+_Click the thumbnail to watch the 19-second terminal demo._
+
 > **Unofficial:** This is an independent community project. It is not affiliated with, maintained by, or endorsed by TypeSafe AI.
 
 ## Features

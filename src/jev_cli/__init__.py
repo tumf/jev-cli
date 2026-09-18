@@ -7,6 +7,7 @@ import argparse
 import getpass
 import json
 import os
+import shutil
 import sys
 import tempfile
 import urllib.error
@@ -16,6 +17,8 @@ from typing import Any
 
 API_URL = "https://api.typesafe.ai/v1/systemone"
 CREDENTIALS_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "jev-cli" / "credentials.json"
+BUNDLED_SKILLS = Path(__file__).with_name("bundled_skills")
+INSTALL_MARKER = ".jev-cli-managed"
 
 
 class CliError(Exception):
@@ -54,6 +57,43 @@ def set_api_key() -> None:
         os.replace(temporary, CREDENTIALS_FILE)
     except OSError as exc:
         raise CliError("could not write the Jev credential store", 3) from exc
+
+
+def install_skills(
+    *, global_install: bool, claude: bool, cwd: Path | None = None, home: Path | None = None
+) -> dict[str, Any]:
+    base = (home or Path.home()) if global_install else (cwd or Path.cwd())
+    flavor = ".claude" if claude else ".agents"
+    destination_root = base / flavor / "skills"
+    installed: list[str] = []
+    paths: list[str] = []
+    for source in sorted(BUNDLED_SKILLS.iterdir()):
+        if not source.is_dir() or not (source / "SKILL.md").is_file():
+            continue
+        destination = destination_root / source.name
+        if destination.exists() and not (destination / INSTALL_MARKER).is_file():
+            raise CliError(f"refusing to overwrite unmanaged skill: {destination}")
+        destination_root.mkdir(parents=True, exist_ok=True)
+        staged = Path(tempfile.mkdtemp(prefix=f".{source.name}-", dir=destination_root))
+        try:
+            shutil.copytree(source, staged, dirs_exist_ok=True)
+            (staged / INSTALL_MARKER).write_text("managed by jev install-skills\n")
+            if destination.exists():
+                shutil.rmtree(destination)
+            staged.replace(destination)
+        except OSError as exc:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise CliError(f"could not install skill: {exc}") from exc
+        installed.append(source.name)
+        paths.append(str(destination))
+    return {
+        "ok": True,
+        "scope": "global" if global_install else "local",
+        "flavor": "claude" if claude else "agents",
+        "destination": str(destination_root),
+        "installed": installed,
+        "paths": paths,
+    }
 
 
 def read_text(value: str | None) -> str:
@@ -104,7 +144,7 @@ def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
         headers={
             "Authorization": f"Bearer {api_key()}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.3.0",
+            "User-Agent": "jev-cli/0.4.0",
         },
         method="POST",
     )
@@ -141,14 +181,18 @@ def parser() -> argparse.ArgumentParser:
         prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.3.0")
+    root.add_argument("--version", action="version", version="jev 0.4.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 
     auth = sub.add_parser("auth", help="manage the API key in the Jev credential store")
     auth_sub = auth.add_subparsers(dest="auth_command", required=True)
-    auth_sub.add_parser("set", help="store an API key read from stdin")
+    auth_sub.add_parser("set", help="store an API key from a hidden prompt or stdin")
     auth_sub.add_parser("status", help="check whether an API key is stored")
+
+    skills = sub.add_parser("install-skills", help="install bundled agent skills")
+    skills.add_argument("-g", "--global", dest="global_install", action="store_true", help="install in the user home")
+    skills.add_argument("--claude", action="store_true", help="install for Claude instead of .agents")
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
     noul.add_argument("-q", "--question", required=True, help="question to answer")
@@ -205,6 +249,9 @@ def main() -> int:
             else:
                 api_key()
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
+            return 0
+        if args.command == "install-skills":
+            print(json.dumps(install_skills(global_install=args.global_install, claude=args.claude)))
             return 0
         payload, kind = request_for(args)
         result = call(payload, args.endpoint)

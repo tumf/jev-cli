@@ -4,12 +4,59 @@ import os
 import unittest
 import urllib.error
 from email.message import Message
+from pathlib import Path
 from unittest.mock import patch
 
 import jev_cli as jev
 
 
 class JevTest(unittest.TestCase):
+    def test_install_skills_target_matrix(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cases = [
+                (False, False, root / "project" / ".agents" / "skills"),
+                (False, True, root / "project" / ".claude" / "skills"),
+                (True, False, root / "home" / ".agents" / "skills"),
+                (True, True, root / "home" / ".claude" / "skills"),
+            ]
+            for global_install, claude, expected_root in cases:
+                result = jev.install_skills(
+                    global_install=global_install,
+                    claude=claude,
+                    cwd=root / "project",
+                    home=root / "home",
+                )
+                self.assertEqual(Path(result["destination"]), expected_root)
+                self.assertEqual(result["installed"], ["jev-cli"])
+                self.assertTrue((expected_root / "jev-cli" / "SKILL.md").is_file())
+
+    def test_install_skills_refuses_unmanaged_destination(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / ".agents" / "skills" / "jev-cli"
+            destination.mkdir(parents=True)
+            (destination / "SKILL.md").write_text("user managed")
+            with self.assertRaisesRegex(jev.CliError, "refusing to overwrite"):
+                jev.install_skills(global_install=False, claude=False, cwd=root, home=root)
+            self.assertEqual((destination / "SKILL.md").read_text(), "user managed")
+
+    def test_install_skills_refreshes_managed_destination(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            jev.install_skills(global_install=False, claude=False, cwd=root, home=root)
+            destination = root / ".agents" / "skills" / "jev-cli"
+            (destination / "stale.txt").write_text("stale")
+            jev.install_skills(global_install=False, claude=False, cwd=root, home=root)
+            self.assertFalse((destination / "stale.txt").exists())
+            self.assertTrue((destination / jev.INSTALL_MARKER).is_file())
+
     def test_choice_request(self):
         args = jev.parser().parse_args(
             [

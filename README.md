@@ -76,6 +76,24 @@ The credential directory is created with mode `0700`; the file is written atomic
 
 `--question` and `--state` also accept the short forms `-q` and `-s`. `--value` has no short form.
 
+## Install the bundled Agent Skill
+
+`jev-cli` currently bundles the `jev-cli` skill. Install it for the current project or globally:
+
+```bash
+jev install-skills
+jev install-skills --global
+```
+
+Use `--claude` to target Claude's skill directory instead:
+
+```bash
+jev install-skills --claude
+jev install-skills --global --claude
+```
+
+The command prints JSON. It refreshes only copies it previously installed and refuses to overwrite an unmanaged skill directory.
+
 Ask whether a message expresses urgency. `--value` prints only the resulting probability from `0` to `1`.
 
 ```bash

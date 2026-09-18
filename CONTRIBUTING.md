@@ -34,6 +34,8 @@ The project follows [Semantic Versioning](https://semver.org/). The version sour
 
 ## Release preparation
 
+Run `make build` after editing `skills/`; it refreshes the bundled package copy before building. Verify the wheel contains `jev_cli/bundled_skills/jev-cli/SKILL.md` before release.
+
 Releases use `v<version>` tags, such as `v0.2.0`. The tag must match `project.version` in `pyproject.toml`.
 
 The tag-triggered workflow reruns the quality gate, builds and smoke-tests the wheel, uploads the distributions as a workflow artifact, and creates a GitHub Release. It does not publish to PyPI.

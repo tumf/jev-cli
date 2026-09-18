@@ -1,6 +1,6 @@
 [project]
 name = "jev-cli"
-version = "0.3.0"
+version = "0.4.0"
 description = "Small dependency-free CLI for TypeSafe Jev"
 readme = "README.md"
 license = "MIT"
@@ -29,4 +29,4 @@ requires = ["uv_build>=0.8.15,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-source-include = ["tests/**"]
+source-include = ["tests/**", "skills/**", "scripts/embed_skills.py"]

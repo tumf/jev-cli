@@ -4,7 +4,7 @@ A small, dependency-free CLI for [TypeSafe Jev](https://docs.typesafe.ai/introdu
 
 The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose.
 
-> This is an independent community project. It is not affiliated with or endorsed by TypeSafe AI.
+> **Unofficial:** This is an independent community project. It is not affiliated with, maintained by, or endorsed by TypeSafe AI.
 
 ## Features
 
@@ -42,7 +42,7 @@ jev --version
 Expected output:
 
 ```text
-jev 0.2.0
+jev 0.4.1
 ```
 
 ## Authentication

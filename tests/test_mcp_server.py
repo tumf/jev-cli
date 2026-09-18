@@ -47,6 +47,8 @@ def server_environment(home: str, **overrides: str) -> dict[str, str]:
     environment = {
         "PATH": os.environ.get("PATH", ""),
         "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
+        "HOME": home,
+        "USERPROFILE": home,
         "XDG_CONFIG_HOME": home,
         "JEV_PROVIDER": "custom",
     }
@@ -185,12 +187,13 @@ class McpStdioFramingTest(unittest.TestCase):
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                text=True,
                 env=server_environment(home),
             )
             watchdog = threading.Timer(SUBPROCESS_TIMEOUT, process.kill)
             watchdog.start()
             try:
-                process.stdin.write("".join(json.dumps(frame) + "\n" for frame in frames).encode())
+                process.stdin.write("".join(json.dumps(frame) + "\n" for frame in frames))
                 process.stdin.flush()
                 lines = [process.stdout.readline() for _ in range(3)]
             finally:
@@ -198,11 +201,12 @@ class McpStdioFramingTest(unittest.TestCase):
                 process.stdin.close()
                 process.wait(timeout=SUBPROCESS_TIMEOUT)
                 process.stdout.close()
-                stderr = process.stderr.read().decode(errors="replace")
+                stderr = process.stderr.read()
                 process.stderr.close()
+        self.assertEqual(process.returncode, 0, stderr)
         responses = []
         for line in lines:
-            self.assertTrue(line.endswith(b"\n"), f"truncated stdout line: {line!r}")
+            self.assertTrue(line.endswith("\n"), f"truncated stdout line: {line!r}")
             frame = json.loads(line)
             self.assertEqual(frame["jsonrpc"], "2.0")
             responses.append(frame)
@@ -218,13 +222,14 @@ class McpStdioFramingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             completed = subprocess.run(
                 [sys.executable, "-m", "jev_cli.mcp_server"],
-                input=b"",
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
+                text=True,
                 timeout=SUBPROCESS_TIMEOUT,
                 env=server_environment(home),
             )
-        self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
-        self.assertEqual(completed.stdout, b"")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "")
 
 
 class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):

@@ -5,7 +5,7 @@ UV_TOOL_BIN := $(shell $(UV) tool dir --bin)
 
 install:
 	@command -v "$(UV)" >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
-	$(UV) tool install --force .
+	$(UV) tool install --force --link-mode copy .
 	"$(UV_TOOL_BIN)/jev" --version
 
 test:

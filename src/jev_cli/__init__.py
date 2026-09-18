@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -31,7 +32,7 @@ def api_key() -> str:
         value = data["api_key"]
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise CliError(
-            "TypeSafe API key is not stored; pipe it to: jev auth set",
+            "TypeSafe API key is not stored; run: jev auth set",
             3,
         ) from exc
     if not isinstance(value, str) or not value:
@@ -40,9 +41,7 @@ def api_key() -> str:
 
 
 def set_api_key() -> None:
-    if sys.stdin.isatty():
-        raise CliError("API key must be piped to stdin: jev auth set")
-    value = sys.stdin.read().strip()
+    value = getpass.getpass("TypeSafe API key: ").strip() if sys.stdin.isatty() else sys.stdin.read().strip()
     if not value:
         raise CliError("API key is empty")
     CREDENTIALS_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -105,7 +104,7 @@ def call(payload: dict[str, Any], endpoint: str) -> dict[str, Any]:
         headers={
             "Authorization": f"Bearer {api_key()}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.2.0",
+            "User-Agent": "jev-cli/0.3.0",
         },
         method="POST",
     )
@@ -142,7 +141,7 @@ def parser() -> argparse.ArgumentParser:
         prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.2.0")
+    root.add_argument("--version", action="version", version="jev 0.3.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 
@@ -152,17 +151,17 @@ def parser() -> argparse.ArgumentParser:
     auth_sub.add_parser("status", help="check whether an API key is stored")
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
-    noul.add_argument("question")
-    noul.add_argument("state", nargs="?", help="text, @file, or - for stdin")
+    noul.add_argument("--question", required=True, help="question to answer")
+    noul.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
 
     choice = sub.add_parser("choice", parents=[common], help="choose one option")
-    choice.add_argument("question")
-    choice.add_argument("state", nargs="?", help="text, @file, or - for stdin")
+    choice.add_argument("--question", required=True, help="question to answer")
+    choice.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
     choice.add_argument("-o", "--option", action="append", type=split_pair, required=True, metavar="KEY=DESCRIPTION")
 
     score = sub.add_parser("score", parents=[common], help="score against ordered levels")
-    score.add_argument("question")
-    score.add_argument("state", nargs="?", help="text, @file, or - for stdin")
+    score.add_argument("--question", required=True, help="question to answer")
+    score.add_argument("--state", help="text, @file, or - for stdin (default: stdin)")
     score.add_argument("-l", "--level", action="append", required=True, metavar="DESCRIPTION")
 
     run = sub.add_parser("run", parents=[common], help="send a complete request JSON for batched questions")

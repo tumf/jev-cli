@@ -54,12 +54,14 @@ export TYPESAFE_API_KEY='your-api-key'
 jev auth status
 ```
 
-For local use, pipe the key to the private credential store instead. `auth set` does not accept the key as a command-line argument, which keeps it out of process arguments and shell history.
+For local use, enter the key at the hidden prompt. `auth set` does not accept the key as a command-line argument, which keeps it out of process arguments and shell history.
 
 ```bash
-printf '%s' 'your-api-key' | jev auth set
+jev auth set
 jev auth status
 ```
+
+For non-interactive automation, piping the key to `jev auth set` remains supported.
 
 `auth status` reports only whether a key is available. It never prints the key.
 
@@ -76,8 +78,8 @@ Ask whether a message expresses urgency. `--value` prints only the resulting pro
 
 ```bash
 jev noul \
-  'Does this message express urgency?' \
-  'Please restore service today.' \
+  --question 'Does this message express urgency?' \
+  --state 'Please restore service today.' \
   --value
 ```
 
@@ -91,8 +93,8 @@ Without `--value`, the command returns the complete API response as JSON, includ
 
 ```bash
 jev noul \
-  'Does this message express urgency?' \
-  'Please restore service today.' \
+  --question 'Does this message express urgency?' \
+  --state 'Please restore service today.' \
   --pretty
 ```
 
@@ -104,8 +106,8 @@ Use `noul` for one focused yes/no judgment. The value is the probability that th
 
 ```bash
 jev noul \
-  'Does this message request a refund?' \
-  'The integration is broken, but I do not want a refund.' \
+  --question 'Does this message request a refund?' \
+  --state 'The integration is broken, but I do not want a refund.' \
   --value
 ```
 
@@ -115,8 +117,8 @@ Use `choice` when the answer must be one of a known set. Each option uses `KEY=D
 
 ```bash
 jev choice \
-  'Which team should handle this?' \
-  'The payment integration keeps failing.' \
+  --question 'Which team should handle this?' \
+  --state 'The payment integration keeps failing.' \
   -o 'billing=Payment, charge, or refund issues' \
   -o 'technical=Bugs or integration failures' \
   -o 'other=None of these' \
@@ -129,8 +131,8 @@ Use `score` for an ordered scale. Levels are numbered from zero in the order sup
 
 ```bash
 jev score \
-  'How frustrated is the customer?' \
-  'This has failed for three days. Please help.' \
+  --question 'How frustrated is the customer?' \
+  --state 'This has failed for three days. Please help.' \
   -l 'Calm' \
   -l 'Concerned but civil' \
   -l 'Very angry' \
@@ -145,7 +147,7 @@ Omit the state or pass `-` to read it from stdin. This is useful for pipelines a
 
 ```bash
 printf '%s' 'Please resolve this today.' | \
-  jev noul 'Does this message express urgency?' --value
+  jev noul --question 'Does this message express urgency?' --value
 ```
 
 ### File input
@@ -154,8 +156,8 @@ Prefix a path with `@` to read its contents.
 
 ```bash
 jev noul \
-  'Does this document mention security risks?' \
-  @document.txt \
+  --question 'Does this document mention security risks?' \
+  --state @document.txt \
   --value
 ```
 
@@ -166,7 +168,7 @@ Use `--json-state` to parse the state as JSON. Instructions can refer to named f
 ```bash
 printf '%s' '{"message":"Please respond today"}' | \
   jev noul \
-  'Does `message` express urgency?' \
+  --question 'Does `message` express urgency?' \
   --json-state \
   --value
 ```
@@ -221,7 +223,7 @@ Use `--value` with `noul`, `choice`, or `score` when a script needs only the pri
 
 ```bash
 if awk 'BEGIN { exit !(ARGV[1] >= 0.9) }' \
-  "$(jev noul 'Is this urgent?' 'Restore service today.' --value)"; then
+  "$(jev noul --question 'Is this urgent?' --state 'Restore service today.' --value)"; then
   echo urgent
 fi
 ```
@@ -229,7 +231,7 @@ fi
 Use `--model` to select another model available to the account:
 
 ```bash
-jev noul 'Is this urgent?' 'Restore service today.' \
+jev noul --question 'Is this urgent?' --state 'Restore service today.' \
   --model jev-latest \
   --pretty
 ```
@@ -247,7 +249,7 @@ jev noul 'Is this urgent?' 'Restore service today.' \
 An error is emitted as JSON on stderr:
 
 ```json
-{"ok": false, "error": "TypeSafe API key is not stored; pipe it to: jev auth set"}
+{"ok": false, "error": "TypeSafe API key is not stored; run: jev auth set"}
 ```
 
 ## Scope and limitations

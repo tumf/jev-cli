@@ -8,7 +8,13 @@ Check whether authentication is available without printing the key:
 jev auth status
 ```
 
-Store an API key supplied through stdin:
+In a terminal, enter the API key at the hidden prompt:
+
+```bash
+jev auth set
+```
+
+For non-interactive automation, stdin remains supported:
 
 ```bash
 printf '%s' "$TYPESAFE_API_KEY" | jev auth set
@@ -25,13 +31,13 @@ Resolution order:
 Return a yes/no probability from `0` to `1`:
 
 ```bash
-jev noul 'Does this message require an urgent response?' 'Please respond today.'
+jev noul --question 'Does this message require an urgent response?' --state 'Please respond today.'
 ```
 
 Choose one stable key from explicit criteria:
 
 ```bash
-jev choice 'Which team should receive this?' 'Checkout returns HTTP 500.' \
+jev choice --question 'Which team should receive this?' --state 'Checkout returns HTTP 500.' \
   -o engineering='Software defect or technical failure' \
   -o sales='Purchase or pricing question'
 ```
@@ -39,7 +45,7 @@ jev choice 'Which team should receive this?' 'Checkout returns HTTP 500.' \
 Score against ordered levels:
 
 ```bash
-jev score 'How dissatisfied is this customer?' 'This is the third failure.' \
+jev score --question 'How dissatisfied is this customer?' --state 'This is the third failure.' \
   -l 'Not dissatisfied' \
   -l 'Slightly dissatisfied' \
   -l 'Clearly dissatisfied' \
@@ -57,26 +63,26 @@ jev run request.json
 Literal text:
 
 ```bash
-jev noul 'Does this require action?' 'Please investigate.'
+jev noul --question 'Does this require action?' --state 'Please investigate.'
 ```
 
 File content:
 
 ```bash
-jev noul 'Does this require action?' @message.txt
+jev noul --question 'Does this require action?' --state @message.txt
 ```
 
 Standard input:
 
 ```bash
-printf '%s' 'Please investigate.' | jev noul 'Does this require action?' -
+printf '%s' 'Please investigate.' | jev noul --question 'Does this require action?' --state -
 ```
 
 Structured JSON state:
 
 ```bash
 printf '%s' '{"message":"Please investigate","priority":"high"}' | \
-  jev noul 'Does this require action?' - --json-state
+  jev noul --question 'Does this require action?' --state - --json-state
 ```
 
 ## Output controls
@@ -84,13 +90,13 @@ printf '%s' '{"message":"Please investigate","priority":"high"}' | \
 Pretty JSON:
 
 ```bash
-jev noul 'Does this require action?' 'Please investigate.' --pretty
+jev noul --question 'Does this require action?' --state 'Please investigate.' --pretty
 ```
 
 Primary scalar only:
 
 ```bash
-jev noul 'Does this require action?' 'Please investigate.' --value
+jev noul --question 'Does this require action?' --state 'Please investigate.' --value
 ```
 
 `--value` applies to `noul`, `choice`, and `score`, not `run`.

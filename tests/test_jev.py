@@ -12,14 +12,26 @@ import jev_cli as jev
 class JevTest(unittest.TestCase):
     def test_choice_request(self):
         args = jev.parser().parse_args(
-            ["choice", "Route?", "broken", "-o", "tech=Bug", "-o", "sales=Purchase"]
+            [
+                "choice",
+                "--question",
+                "Route?",
+                "--state",
+                "broken",
+                "-o",
+                "tech=Bug",
+                "-o",
+                "sales=Purchase",
+            ]
         )
         payload, kind = jev.request_for(args)
         self.assertEqual(kind, "choice")
         self.assertEqual(payload["questions"]["answer"]["criteria"], {"tech": "Bug", "sales": "Purchase"})
 
     def test_json_state_from_stdin(self):
-        args = jev.parser().parse_args(["noul", "Urgent?", "-", "--json-state"])
+        args = jev.parser().parse_args(
+            ["noul", "--question", "Urgent?", "--state", "-", "--json-state"]
+        )
         with patch("sys.stdin", io.StringIO('{"message":"today"}')):
             payload, _ = jev.request_for(args)
         self.assertEqual(payload["state"], {"message": "today"})
@@ -49,6 +61,19 @@ class JevTest(unittest.TestCase):
                 self.assertEqual(jev.CREDENTIALS_FILE.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(jev.CREDENTIALS_FILE.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_set_api_key_prompts_without_echo_on_tty(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            jev, "CREDENTIALS_FILE", Path(directory) / "jev-cli" / "credentials.json"
+        ), patch("sys.stdin.isatty", return_value=True), patch.object(
+            jev.getpass, "getpass", return_value="prompted-key"
+        ) as prompt, patch.dict(os.environ, {}, clear=True):
+            jev.set_api_key()
+            prompt.assert_called_once_with("TypeSafe API key: ")
+            self.assertEqual(jev.api_key(), "prompted-key")
+
     def test_primary_values(self):
         result = {"answers": {"answer": {"noul": 0.9, "choice": "a", "score": 1.5}}}
         self.assertEqual(jev.primary_value(result, "noul"), 0.9)
@@ -75,7 +100,7 @@ class JevTest(unittest.TestCase):
         self.assertEqual(raised.exception.exit_code, 4)
 
     def test_main_prints_only_primary_value(self):
-        argv = ["jev", "noul", "Urgent?", "today", "--value"]
+        argv = ["jev", "noul", "--question", "Urgent?", "--state", "today", "--value"]
         with patch("sys.argv", argv), patch.object(
             jev, "call", return_value={"answers": {"answer": {"noul": 0.9}}}
         ), patch("sys.stdout", new_callable=io.StringIO) as stdout:

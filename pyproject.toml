@@ -1,6 +1,6 @@
 [project]
 name = "jev-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Small CLI and stdio MCP server for TypeSafe Jev"
 readme = "README.md"
 license = "MIT"

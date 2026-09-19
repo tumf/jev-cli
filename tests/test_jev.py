@@ -1,12 +1,16 @@
 import io
 import json
 import os
-import termios
 import unittest
 import urllib.error
 from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+try:
+    import termios
+except ImportError:
+    termios = None
 
 import jev_cli as jev
 
@@ -149,6 +153,7 @@ class JevTest(unittest.TestCase):
         self.assertEqual(stderr.getvalue(), "\nCancelled.\n")
         self.assertNotIn("Traceback", stderr.getvalue())
 
+    @unittest.skipIf(termios is None, "termios is unavailable")
     def test_masked_getpass_shows_one_asterisk_per_character(self):
         stdin = MagicMock()
         stdin.fileno.return_value = 7

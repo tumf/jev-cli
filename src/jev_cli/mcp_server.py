@@ -134,7 +134,7 @@ logger = logging.getLogger(__name__)
 mcp = MCPServer(
     name="jev",
     title="TypeSafe Jev",
-    version="0.6.1",
+    version="0.6.2",
     instructions=(
         "Ask TypeSafe Jev typed questions about text or JSON state. Use noul for a yes/no "
         "probability, choice for one key from explicit options, score for an ordered level, "

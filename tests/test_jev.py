@@ -1,11 +1,12 @@
 import io
 import json
 import os
+import termios
 import unittest
 import urllib.error
 from email.message import Message
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import jev_cli as jev
 
@@ -140,6 +141,25 @@ class JevTest(unittest.TestCase):
                 self.assertEqual(jev.CREDENTIALS_FILE.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(jev.CREDENTIALS_FILE.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_auth_set_interrupt_exits_without_traceback(self):
+        with patch("sys.argv", ["jev", "auth", "set"]), patch.object(
+            jev, "set_api_key", side_effect=KeyboardInterrupt
+        ), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(jev.main(), 130)
+        self.assertEqual(stderr.getvalue(), "\nCancelled.\n")
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_masked_getpass_shows_one_asterisk_per_character(self):
+        stdin = MagicMock()
+        stdin.fileno.return_value = 7
+        stdin.read.side_effect = ["s", "e", "x", "\x7f", "c", "r", "e", "t", "\n"]
+        stderr = io.StringIO()
+        with patch("sys.stdin", stdin), patch("sys.stderr", stderr), patch.object(
+            termios, "tcgetattr", return_value=[0, 0, 0, termios.ECHO, 0, 0]
+        ), patch.object(termios, "tcsetattr"):
+            self.assertEqual(jev.masked_getpass("TypeSafe API key: "), "secret")
+        self.assertEqual(stderr.getvalue(), "TypeSafe API key: ***\b \b****\n")
+
     def test_set_api_key_prompts_without_echo_on_tty(self):
         import tempfile
         from pathlib import Path
@@ -147,7 +167,7 @@ class JevTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.object(
             jev, "CREDENTIALS_FILE", Path(directory) / "jev-cli" / "credentials.json"
         ), patch("sys.stdin.isatty", return_value=True), patch.object(
-            jev.getpass, "getpass", return_value="prompted-key"
+            jev, "masked_getpass", return_value="prompted-key"
         ) as prompt, patch.dict(os.environ, {}, clear=True):
             jev.set_api_key()
             prompt.assert_called_once_with("TypeSafe API key: ")

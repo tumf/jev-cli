@@ -49,6 +49,44 @@ class CliError(Exception):
         self.exit_code = exit_code
 
 
+def masked_getpass(prompt: str) -> str:
+    """Read a secret while showing one asterisk per entered character."""
+    try:
+        import termios
+    except ImportError:
+        return getpass.getpass(prompt)
+
+    stream = sys.stderr
+    stream.write(prompt)
+    stream.flush()
+    fd = sys.stdin.fileno()
+    previous = termios.tcgetattr(fd)
+    current = previous.copy()
+    current[3] &= ~(termios.ECHO | termios.ICANON)
+    characters: list[str] = []
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, current)
+        while True:
+            character = sys.stdin.read(1)
+            if character in ("\n", "\r"):
+                stream.write("\n")
+                return "".join(characters)
+            if character == "\x03":
+                raise KeyboardInterrupt
+            if character in ("\x7f", "\b"):
+                if characters:
+                    characters.pop()
+                    stream.write("\b \b")
+            elif character:
+                characters.append(character)
+                stream.write("*")
+            else:
+                raise EOFError
+            stream.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, previous)
+
+
 def api_key(provider: str = "official") -> str:
     config = PROVIDERS[provider]
     if value := os.environ.get(config["key_env"]):
@@ -73,7 +111,7 @@ def api_key(provider: str = "official") -> str:
 
 def set_api_key(provider: str = "official") -> None:
     label = "TypeSafe" if provider == "official" else provider
-    value = getpass.getpass(f"{label} API key: ").strip() if sys.stdin.isatty() else sys.stdin.read().strip()
+    value = masked_getpass(f"{label} API key: ").strip() if sys.stdin.isatty() else sys.stdin.read().strip()
     if not value:
         raise CliError("API key is empty")
     CREDENTIALS_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -400,6 +438,9 @@ def main() -> int:
     except (KeyError, TypeError) as exc:
         print(json.dumps({"ok": False, "error": f"unexpected API response: {exc}"}), file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

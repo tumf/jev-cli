@@ -295,6 +295,8 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
             detail = body
         code = 3 if exc.code in (401, 403) else 4 if exc.code in (429, 500, 502, 503, 504) else 1
         raise CliError(f"API HTTP {exc.code}: {json.dumps(detail, ensure_ascii=False)}", code) from exc
+    except json.JSONDecodeError as exc:
+        raise CliError(f"API returned invalid JSON: {exc}", 4) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise CliError(f"API connection failed: {exc}", 4) from exc
     if not isinstance(result, dict):

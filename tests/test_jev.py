@@ -369,6 +369,14 @@ class JevTest(unittest.TestCase):
                 jev.call({"state": "test", "questions": {}}, "https://example.test")
         self.assertEqual(raised.exception.exit_code, 4)
 
+    def test_call_maps_non_json_success_response_to_exit_code_4(self):
+        with patch.object(jev, "api_key", return_value="test-key"), patch(
+            "urllib.request.urlopen", return_value=io.BytesIO(b"<html>gateway timeout</html>")
+        ):
+            with self.assertRaisesRegex(jev.CliError, "API returned invalid JSON") as raised:
+                jev.call({"state": "test", "questions": {}}, "https://example.test")
+        self.assertEqual(raised.exception.exit_code, 4)
+
     def test_main_prints_only_primary_value(self):
         argv = ["jev", "noul", "--question", "Urgent?", "--state", "today", "--value"]
         with patch("sys.argv", argv), patch.object(

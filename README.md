@@ -1,5 +1,7 @@
 # jev-cli
 
+[![Follow jev-cli on Product Hunt](https://api.producthunt.com/widgets/embed-image/v1/follow.svg?product_id=1321941&theme=light)](https://www.producthunt.com/products/jev-cli)
+
 A small CLI and stdio MCP server for [TypeSafe Jev](https://docs.typesafe.ai/introduction). Send text or JSON state, ask typed questions, and receive machine-readable `noul`, `choice`, or `score` answers.
 
 The `jev` command is useful when application code needs a fast classification or judgment instead of generated prose. The `jev-mcp` command exposes the same judgments to MCP hosts over stdio.

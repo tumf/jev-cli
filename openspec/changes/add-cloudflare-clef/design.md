@@ -1,0 +1,16 @@
+# Design
+
+Use the existing provider dictionary and shared HTTP boundary. Add cloudflare with key env CLOUDFLARE_API_TOKEN and default model clef-flash; auth set/status/test use the existing provider credential store (no secret output). Require CLOUDFLARE_ACCOUNT_ID matching 32 hexadecimal characters to construct https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}. Accept only clef and clef-flash for this provider, fail before network for unsupported model. Add an optional model argument to provider_endpoint after existing positional arguments so callers stay compatible; pass the effective payload model from main, auth test and MCP evaluate. A supplied endpoint bypasses account requirement but does not bypass model validation. CLI, auth test and MCP resolve endpoints before calling the shared transport; direct calls to the transport do not perform endpoint validation. Payload model in CLI run retains current precedence; MCP run retains its explicit-argument override behavior.
+
+REST response is the documented Cloudflare envelope {success: true, result: {model, answers, usage}, errors: [], messages: []}. Require success is True and object result with object answers; failures/malformed envelopes raise CliError and never produce successful value output. Remove each answer's type discriminator (as done for Vercel), preserve all actual numerical values, probabilities, confidence, legend, model and usage; do not invent probabilities or add provider metadata. Keep HTTP error exit mappings unchanged; in-band failure returns exit 1 with a bounded generic message rather than reflecting input/secrets.
+
+Existing run requests forward images and unknown fields unchanged; no claims that remote image URLs work. Default official endpoint/model, legacy credentials, TYPESAFE_API_URL, custom endpoint overrides, existing stdout contracts stay unchanged. MCP Provider Literal includes cloudflare, and canonical MCP spec gains a separate additive requirement rather than rewriting unrelated requirements.
+
+Document token permission Workers AI Read/Edit, account ID and stored-key/environment setup in English/Japanese READMEs and canonical bundled skill sources; regenerate with scripts/embed_skills.py. No model-version release bump. Tests cover both URL model selections, invalid account/model and no-network errors, credential isolation, all typed outputs and value extraction, run images forwarding, failed/malformed envelope, existing providers, MCP schema/execution.
+
+Sources (2026-10-06):
+- https://developers.cloudflare.com/workers-ai/models/clef/schema-input.json
+- https://developers.cloudflare.com/workers-ai/models/clef/schema-output.json
+- https://developers.cloudflare.com/workers-ai/models/clef-flash/
+- https://developers.cloudflare.com/workers-ai/get-started/rest-api/
+Documentation-derived fixtures are contract tests, not observed successful inference. A real probe is separate; currently these CF environment variables are absent. Do not access unrelated project secrets or expose existing credential stores. Live inference only with authorized available credentials and synthetic text, at most one short batched request per model. If unavailable, report live inference unverified, not a completed live integration.

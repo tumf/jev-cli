@@ -325,7 +325,7 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
         headers={
             "Authorization": f"Bearer {api_key(provider)}",
             "Content-Type": "application/json",
-            "User-Agent": "jev-cli/0.6.3",
+            "User-Agent": "jev-cli/0.7.0",
             **provider_headers,
         },
         method="POST",
@@ -372,7 +372,7 @@ def parser() -> argparse.ArgumentParser:
         prog="jev",
         description="Evaluate text or JSON with TypeSafe Jev. Uses its own local credential store.",
     )
-    root.add_argument("--version", action="version", version="jev 0.6.3")
+    root.add_argument("--version", action="version", version="jev 0.7.0")
     sub = root.add_subparsers(dest="command", required=True)
     common = common_parser()
 

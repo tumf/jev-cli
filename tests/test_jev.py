@@ -184,6 +184,7 @@ class JevTest(unittest.TestCase):
             "vercel": "typesafe-ai/jev",
             "openrouter": "typesafe/jev-1.13",
             "custom": "jev-latest",
+            "cloudflare": "clef-flash",
         }
         for provider, model in cases.items():
             args = jev.parser().parse_args(
@@ -309,6 +310,7 @@ class JevTest(unittest.TestCase):
             "official": {"answers": {}},
             "openrouter": {"answers": {}},
             "custom": {"answers": {}},
+            "cloudflare": {"success": True, "result": {"model": "clef-flash", "answers": {}}, "errors": []},
             "vercel": {
                 "answers": {
                     "urgent": {"type": "boolean", "probability": 0.9},
@@ -319,6 +321,8 @@ class JevTest(unittest.TestCase):
         }
         for provider, config in jev.PROVIDERS.items():
             captured = []
+            # Providers without a fixed endpoint (custom, cloudflare) are given one explicitly;
+            # call() is the transport and does not resolve or validate endpoints itself.
             endpoint = config["endpoint"] or "https://proxy.example.test/v1/systemone"
 
             def open_url(request, timeout):
@@ -341,6 +345,9 @@ class JevTest(unittest.TestCase):
                 self.assertEqual(result["answers"]["urgent"], {"noul": 0.9})
                 self.assertEqual(result["answers"]["route"]["choice"], "a")
                 self.assertEqual(result["answers"]["quality"]["score"], 1.0)
+            elif provider == "cloudflare":
+                self.assertEqual(body, payload)
+                self.assertEqual(result, {"model": "clef-flash", "answers": {}})
             else:
                 self.assertEqual(body, payload)
 
@@ -391,6 +398,295 @@ class JevTest(unittest.TestCase):
         ) as stderr:
             self.assertEqual(jev.main(), 2)
         self.assertEqual(json.loads(stderr.getvalue())["ok"], False)
+
+
+CLOUDFLARE_ACCOUNT = "0123456789abcdef0123456789ABCDEF"
+CLOUDFLARE_ENVIRONMENT = {"CLOUDFLARE_ACCOUNT_ID": CLOUDFLARE_ACCOUNT, "CLOUDFLARE_API_TOKEN": "cf-token"}
+
+
+def cloudflare_url(model: str) -> str:
+    return f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT}/ai/run/@cf/cloudflare/{model}"
+
+
+def cloudflare_envelope(answers: dict) -> dict:
+    """A successful Workers AI REST envelope as documented by the Clef output schema."""
+    return {
+        "success": True,
+        "result": {"model": "clef-flash", "answers": answers, "usage": {"input_tokens": 12, "output_tokens": 3}},
+        "errors": [],
+        "messages": [],
+    }
+
+
+TYPED_CLOUDFLARE_ANSWERS = {
+    "urgent": {"type": "noul", "noul": 0.82},
+    "route": {"type": "choice", "choice": "tech", "probabilities": {"tech": 0.7, "sales": 0.3}, "confidence": 0.55},
+    "anger": {
+        "type": "score",
+        "score": 1.4,
+        "legend": {"0": "Calm", "1": "Concerned", "2": "Angry"},
+        "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5},
+        "confidence": 0.3,
+    },
+}
+
+
+class HttpResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+class CloudflareProviderTest(unittest.TestCase):
+    def run_main(self, argv, body=None, environment=CLOUDFLARE_ENVIRONMENT, stdin=None):
+        """Run the CLI against a fake Workers AI endpoint and return (exit, stdout, stderr, requests)."""
+        captured = []
+
+        def open_url(request, timeout):
+            captured.append(request)
+            return HttpResponse(json.dumps(body).encode())
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, environment, clear=True), patch("sys.argv", ["jev", *argv]), patch(
+            "urllib.request.urlopen", side_effect=open_url
+        ), patch("sys.stdout", stdout), patch("sys.stderr", stderr), patch(
+            "sys.stdin", stdin or io.StringIO("")
+        ):
+            code = jev.main()
+        return code, stdout.getvalue(), stderr.getvalue(), captured
+
+    def test_endpoint_follows_the_selected_model(self):
+        with patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": CLOUDFLARE_ACCOUNT}, clear=True):
+            self.assertEqual(jev.provider_endpoint("cloudflare"), cloudflare_url("clef-flash"))
+            self.assertEqual(jev.provider_endpoint("cloudflare", None, "clef-flash"), cloudflare_url("clef-flash"))
+            self.assertEqual(jev.provider_endpoint("cloudflare", None, "clef"), cloudflare_url("clef"))
+
+    def test_other_providers_ignore_the_model_argument(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(jev.provider_endpoint("official", None, "anything"), jev.API_URL)
+            self.assertEqual(
+                jev.provider_endpoint("openrouter", None, "clef"), jev.PROVIDERS["openrouter"]["endpoint"]
+            )
+
+    def test_cli_posts_each_model_to_its_url_with_bearer_token(self):
+        for model, extra in (("clef-flash", []), ("clef", ["--model", "clef"])):
+            with self.subTest(model=model):
+                code, stdout, _, captured = self.run_main(
+                    ["noul", "--provider", "cloudflare", "-q", "Urgent?", "-s", "today", *extra],
+                    cloudflare_envelope({"answer": {"type": "noul", "noul": 0.9}}),
+                )
+                self.assertEqual(code, 0)
+                request = captured[0]
+                self.assertEqual(request.full_url, cloudflare_url(model))
+                self.assertEqual(request.get_method(), "POST")
+                self.assertEqual(request.headers["Authorization"], "Bearer cf-token")
+                self.assertEqual(json.loads(request.data)["model"], model)
+                self.assertEqual(
+                    json.loads(stdout),
+                    {
+                        "model": "clef-flash",
+                        "answers": {"answer": {"noul": 0.9}},
+                        "usage": {"input_tokens": 12, "output_tokens": 3},
+                    },
+                )
+
+    def test_invalid_configuration_fails_before_network_access(self):
+        cases = (
+            ({"CLOUDFLARE_API_TOKEN": "cf-token"}, [], "CLOUDFLARE_ACCOUNT_ID"),
+            ({**CLOUDFLARE_ENVIRONMENT, "CLOUDFLARE_ACCOUNT_ID": "abc123"}, [], "CLOUDFLARE_ACCOUNT_ID"),
+            ({**CLOUDFLARE_ENVIRONMENT, "CLOUDFLARE_ACCOUNT_ID": "g" * 32}, [], "CLOUDFLARE_ACCOUNT_ID"),
+            ({**CLOUDFLARE_ENVIRONMENT, "CLOUDFLARE_ACCOUNT_ID": CLOUDFLARE_ACCOUNT + "/x"}, [], "CLOUDFLARE_ACCOUNT_ID"),
+            (CLOUDFLARE_ENVIRONMENT, ["--model", "jev-latest"], "clef"),
+            (CLOUDFLARE_ENVIRONMENT, ["--model", "clef/../other"], "clef"),
+            # An endpoint override replaces only the account-derived URL, never model validation.
+            (CLOUDFLARE_ENVIRONMENT, ["--model", "other", "--endpoint", "https://proxy.test/clef"], "clef"),
+        )
+        for environment, extra, message in cases:
+            with self.subTest(environment=environment, extra=extra):
+                code, stdout, stderr, captured = self.run_main(
+                    ["noul", "--provider", "cloudflare", "-q", "Urgent?", "-s", "today", *extra],
+                    environment=environment,
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout, "")
+                self.assertEqual(captured, [])
+                error = json.loads(stderr)
+                self.assertFalse(error["ok"])
+                self.assertIn(message, error["error"])
+                self.assertNotIn("cf-token", stderr)
+
+    def test_run_with_an_explicit_falsy_model_fails_before_network_access(self):
+        for model in (None, "", False, 0):
+            with self.subTest(model=model):
+                request = json.dumps({"state": "today", "questions": {}, "model": model})
+                code, stdout, stderr, captured = self.run_main(
+                    ["run", "-", "--provider", "cloudflare"], stdin=io.StringIO(request)
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout, "")
+                self.assertEqual(captured, [])
+                error = json.loads(stderr)
+                self.assertFalse(error["ok"])
+                self.assertIn("clef, clef-flash", error["error"])
+
+    def test_endpoint_override_bypasses_only_the_account_requirement(self):
+        code, _, _, captured = self.run_main(
+            ["noul", "--provider", "cloudflare", "--model", "clef", "-q", "Urgent?", "-s", "today",
+             "--endpoint", "https://proxy.test/clef"],
+            cloudflare_envelope({"answer": {"type": "noul", "noul": 0.4}}),
+            environment={"CLOUDFLARE_API_TOKEN": "cf-token"},
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(captured[0].full_url, "https://proxy.test/clef")
+
+    def test_typed_answers_are_normalized_without_synthesized_values(self):
+        result = jev.normalize_response(cloudflare_envelope(TYPED_CLOUDFLARE_ANSWERS), "cloudflare")
+        self.assertEqual(
+            result,
+            {
+                "model": "clef-flash",
+                "answers": {
+                    "urgent": {"noul": 0.82},
+                    "route": {"choice": "tech", "probabilities": {"tech": 0.7, "sales": 0.3}, "confidence": 0.55},
+                    "anger": {
+                        "score": 1.4,
+                        "legend": {"0": "Calm", "1": "Concerned", "2": "Angry"},
+                        "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5},
+                        "confidence": 0.3,
+                    },
+                },
+                "usage": {"input_tokens": 12, "output_tokens": 3},
+            },
+        )
+
+    def test_value_output_exposes_each_typed_decision(self):
+        cases = (
+            (["noul"], {"type": "noul", "noul": 0.82}, "0.82\n"),
+            (["choice", "-o", "tech=Bug", "-o", "sales=Purchase"], TYPED_CLOUDFLARE_ANSWERS["route"], "tech\n"),
+            (["score", "-l", "Calm", "-l", "Concerned", "-l", "Angry"], TYPED_CLOUDFLARE_ANSWERS["anger"], "1.4\n"),
+        )
+        for command, answer, expected in cases:
+            with self.subTest(command=command[0]):
+                code, stdout, _, captured = self.run_main(
+                    [*command, "--provider", "cloudflare", "-q", "Q?", "-s", "today", "--value"],
+                    cloudflare_envelope({"answer": answer}),
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(stdout, expected)
+                self.assertEqual(json.loads(captured[0].data)["questions"]["answer"]["type"], command[0])
+
+    def test_failed_or_malformed_envelopes_never_emit_decisions(self):
+        decisions = {"answer": {"type": "noul", "noul": 0.9}}
+        bodies = (
+            {"success": False, "result": {"answers": decisions}, "errors": [{"message": "secret-input"}]},
+            {"result": {"answers": decisions}},
+            {"success": "true", "result": {"answers": decisions}},
+            {"success": True, "result": None},
+            {"success": True, "result": [decisions]},
+            {"success": True, "result": {"model": "clef-flash"}},
+            {"success": True, "result": {"answers": [0.9]}},
+            {"success": True, "result": {"answers": {"answer": 0.9}}},
+            # A bare System One response is not a Workers AI envelope.
+            {"model": "clef-flash", "answers": decisions},
+        )
+        for body in bodies:
+            for value in ([], ["--value"]):
+                with self.subTest(body=body, value=value):
+                    code, stdout, stderr, _ = self.run_main(
+                        ["noul", "--provider", "cloudflare", "-q", "Urgent?", "-s", "today", *value], body
+                    )
+                    self.assertEqual(code, 1)
+                    self.assertEqual(stdout, "")
+                    self.assertFalse(json.loads(stderr)["ok"])
+                    self.assertNotIn("secret-input", stderr)
+                    self.assertNotIn("cf-token", stderr)
+
+    def test_http_failures_keep_existing_exit_codes(self):
+        for status, expected in ((401, 3), (403, 3), (429, 4), (500, 4), (400, 1)):
+            error = urllib.error.HTTPError(
+                "https://api.cloudflare.com", status, "error", Message(), io.BytesIO(b'{"success":false}')
+            )
+            with self.subTest(status=status), patch.dict(os.environ, CLOUDFLARE_ENVIRONMENT, clear=True), patch(
+                "urllib.request.urlopen", side_effect=error
+            ):
+                with self.assertRaises(jev.CliError) as raised:
+                    jev.call({"model": "clef", "state": "s", "questions": {}}, cloudflare_url("clef"), "cloudflare")
+            self.assertEqual(raised.exception.exit_code, expected)
+
+    def test_run_forwards_images_and_unknown_fields_to_the_effective_model_url(self):
+        request = {
+            "state": {"message": "today"},
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "route": {"type": "choice", "instructions": "Route?", "criteria": {"tech": "Bug", "sales": "Buy"}},
+            },
+            "images": ["data:image/png;base64,iVBORw0KGgo=", {"content_type": "image/webp", "base64": "UklGRg=="}],
+            "unknown_request_field": {"nested": [1, 2]},
+        }
+        cases = (
+            (request, [], "clef-flash"),
+            (request, ["--model", "clef"], "clef"),
+            # The request model keeps precedence over --model, and selects the URL.
+            ({**request, "model": "clef"}, ["--model", "clef-flash"], "clef"),
+        )
+        for sent, extra, model in cases:
+            with self.subTest(model=model, extra=extra):
+                code, stdout, _, captured = self.run_main(
+                    ["run", "-", "--provider", "cloudflare", *extra],
+                    cloudflare_envelope(TYPED_CLOUDFLARE_ANSWERS),
+                    stdin=io.StringIO(json.dumps(sent)),
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(captured[0].full_url, cloudflare_url(model))
+                self.assertEqual(json.loads(captured[0].data), {**sent, "model": model})
+                self.assertEqual(json.loads(stdout)["answers"]["urgent"], {"noul": 0.82})
+
+    def test_run_with_unsupported_request_model_fails_before_network(self):
+        code, stdout, _, captured = self.run_main(
+            ["run", "-", "--provider", "cloudflare"],
+            stdin=io.StringIO(json.dumps({"state": "s", "questions": {}, "model": "jev-latest"})),
+        )
+        self.assertEqual((code, stdout, captured), (2, "", []))
+
+    def test_auth_test_uses_the_default_model_url(self):
+        code, stdout, _, captured = self.run_main(
+            ["auth", "test", "--provider", "cloudflare"], cloudflare_envelope({"answer": {"type": "noul", "noul": 1.0}})
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(captured[0].full_url, cloudflare_url("clef-flash"))
+        self.assertEqual(json.loads(captured[0].data)["model"], "clef-flash")
+        self.assertEqual(json.loads(stdout), {"ok": True, "valid": True, "model": "clef-flash"})
+
+    def test_credentials_are_isolated_from_other_providers(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            jev, "CREDENTIALS_FILE", Path(directory) / "jev-cli" / "credentials.json"
+        ), patch.dict(os.environ, {}, clear=True):
+            for provider in ("official", "openrouter"):
+                with patch("sys.stdin", io.StringIO(f"{provider}-key\n")):
+                    jev.set_api_key(provider)
+            with self.assertRaisesRegex(jev.CliError, "cloudflare API key"):
+                jev.api_key("cloudflare")
+            with patch("sys.stdin", io.StringIO("stored-cf-token\n")):
+                jev.set_api_key("cloudflare")
+            self.assertEqual(jev.api_key("cloudflare"), "stored-cf-token")
+            self.assertEqual(jev.api_key("official"), "official-key")
+            self.assertEqual(jev.api_key("openrouter"), "openrouter-key")
+            with patch.dict(os.environ, {"CLOUDFLARE_API_TOKEN": "environment-cf-token"}):
+                self.assertEqual(jev.api_key("cloudflare"), "environment-cf-token")
+                self.assertEqual(jev.api_key("official"), "official-key")
+            with patch.dict(os.environ, {"TYPESAFE_API_KEY": "typesafe-key"}):
+                self.assertEqual(jev.api_key("cloudflare"), "stored-cf-token")
+            self.assertNotIn("api_key", json.loads(jev.CREDENTIALS_FILE.read_text()))
+
+    def test_default_provider_is_unchanged(self):
+        with patch.dict(os.environ, {}, clear=True):
+            args = jev.parser().parse_args(["noul", "-q", "Urgent?", "-s", "today"])
+        self.assertEqual(args.provider, "official")
+        self.assertEqual(jev.request_for(args)[0]["model"], "jev-latest")
 
 
 if __name__ == "__main__":

@@ -496,5 +496,107 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured[0].headers["Ai-model-id"], "typesafe-ai/jev")
 
 
+    async def test_cloudflare_endpoint_matches_the_effective_model(self):
+        account = "0123456789abcdef0123456789abcdef"
+        base = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/"
+        cases = (
+            ("noul", {"state": "today", "question": "Urgent?"}, "clef-flash"),
+            ("noul", {"state": "today", "question": "Urgent?", "model": "clef"}, "clef"),
+            ("score", {"state": "x", "question": "q", "levels": ["low", "high"], "model": "clef-flash"}, "clef-flash"),
+            ("run", {"request": {"state": "today", "questions": {}}}, "clef-flash"),
+            ("run", {"request": {"state": "today", "questions": {}, "model": "clef"}}, "clef"),
+            ("run", {"request": {"state": "today", "questions": {}, "model": "clef"}, "model": "clef-flash"}, "clef-flash"),
+        )
+        for name, arguments, model in cases:
+            with self.subTest(tool=name, arguments=arguments), patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": account}):
+                result, call = await self.invoke(name, {**arguments, "provider": "cloudflare"})
+                self.assertFalse(result.is_error)
+                payload, endpoint, provider = call.call_args.args
+                self.assertEqual(provider, "cloudflare")
+                self.assertEqual(payload["model"], model)
+                self.assertEqual(endpoint, base + model)
+
+    async def test_cloudflare_configuration_errors_fail_before_any_provider_access(self):
+        account = "0123456789abcdef0123456789abcdef"
+        cases = (
+            ({}, {"state": "today", "question": "Urgent?"}, "CLOUDFLARE_ACCOUNT_ID"),
+            ({"CLOUDFLARE_ACCOUNT_ID": "not-an-account"}, {"state": "today", "question": "Urgent?"}, "CLOUDFLARE_ACCOUNT_ID"),
+            ({"CLOUDFLARE_ACCOUNT_ID": account}, {"state": "today", "question": "Urgent?", "model": "jev-latest"}, "clef"),
+            (
+                {},
+                {"state": "today", "question": "Urgent?", "model": "other", "endpoint": "https://proxy.test/clef"},
+                "clef",
+            ),
+        )
+        for environment, arguments, message in cases:
+            with self.subTest(environment=environment, arguments=arguments):
+                with patch.dict(os.environ, environment), patch.object(mcp_server, "call") as call, patch(
+                    "urllib.request.urlopen", side_effect=AssertionError("network access")
+                ):
+                    result = await self.call_tool("noul", {**arguments, "provider": "cloudflare"})
+                self.assertTrue(result.is_error)
+                self.assertIsNone(result.structured_content)
+                self.assertIn(message, result.content[0].text)
+                call.assert_not_called()
+
+    async def test_cloudflare_run_with_an_empty_request_model_fails_before_any_provider_access(self):
+        account = "0123456789abcdef0123456789abcdef"
+        with patch.dict(os.environ, {"CLOUDFLARE_ACCOUNT_ID": account}), patch.object(mcp_server, "call") as call, patch(
+            "urllib.request.urlopen", side_effect=AssertionError("network access")
+        ):
+            result = await self.call_tool(
+                "run", {"request": {"state": "today", "questions": {}, "model": ""}, "provider": "cloudflare"}
+            )
+        self.assertTrue(result.is_error)
+        self.assertIsNone(result.structured_content)
+        self.assertIn("clef, clef-flash", result.content[0].text)
+        call.assert_not_called()
+
+    async def test_cloudflare_envelope_normalization_reaches_the_tool_result(self):
+        account = "0123456789abcdef0123456789abcdef"
+        body = {
+            "success": True,
+            "result": {
+                "model": "clef",
+                "answers": {"answer": {"type": "choice", "choice": "a", "probabilities": {"a": 0.6, "b": 0.4}, "confidence": 0.2}},
+                "usage": {"input_tokens": 5, "output_tokens": 1},
+            },
+            "errors": [],
+            "messages": [],
+        }
+        captured = []
+
+        def open_url(request, timeout):
+            captured.append(request)
+            return HttpResponse(json.dumps(body).encode())
+
+        environment = {"CLOUDFLARE_ACCOUNT_ID": account, "CLOUDFLARE_API_TOKEN": "cf-token"}
+        with patch.dict(os.environ, environment), patch("urllib.request.urlopen", side_effect=open_url):
+            result = await self.call_tool(
+                "choice",
+                {"state": "s", "question": "q", "options": {"a": "A", "b": "B"}, "provider": "cloudflare", "model": "clef"},
+            )
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content, {**body["result"], "answers": {"answer": {"choice": "a", "probabilities": {"a": 0.6, "b": 0.4}, "confidence": 0.2}}})
+        self.assertEqual(
+            captured[0].full_url, f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/clef"
+        )
+        self.assertEqual(captured[0].headers["Authorization"], "Bearer cf-token")
+        self.assertEqual(json.loads(captured[0].data)["model"], "clef")
+
+    async def test_cloudflare_failed_envelope_is_a_tool_error(self):
+        account = "0123456789abcdef0123456789abcdef"
+        body = {"success": False, "result": {"answers": {"answer": {"type": "noul", "noul": 0.9}}}, "errors": [{"message": "x"}]}
+        environment = {"CLOUDFLARE_ACCOUNT_ID": account, "CLOUDFLARE_API_TOKEN": "cf-token"}
+        with patch.dict(os.environ, environment), patch(
+            "urllib.request.urlopen", return_value=HttpResponse(json.dumps(body).encode())
+        ):
+            result = await self.call_tool("noul", {"state": "s", "question": "q", "provider": "cloudflare"})
+        self.assertTrue(result.is_error)
+        self.assertIsNone(result.structured_content)
+        self.assertNotIn("0.9", result.content[0].text)
+        self.assertNotIn("cf-token", result.content[0].text)
+
+
 if __name__ == "__main__":
     unittest.main()

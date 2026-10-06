@@ -7,6 +7,7 @@ import argparse
 import getpass
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -36,7 +37,15 @@ PROVIDERS = {
         "key_env": "JEV_API_KEY",
         "model": "jev-latest",
     },
+    # The Workers AI URL depends on the account and model, so it is built by provider_endpoint.
+    "cloudflare": {
+        "endpoint": None,
+        "key_env": "CLOUDFLARE_API_TOKEN",
+        "model": "clef-flash",
+    },
 }
+CLOUDFLARE_ENDPOINT = "https://api.cloudflare.com/client/v4/accounts/{account}/ai/run/@cf/cloudflare/{model}"
+CLOUDFLARE_MODELS = ("clef", "clef-flash")
 API_URL = PROVIDERS["official"]["endpoint"]
 CREDENTIALS_FILE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "jev-cli" / "credentials.json"
 BUNDLED_SKILLS = Path(__file__).with_name("bundled_skills")
@@ -235,7 +244,25 @@ def provider_request(payload: dict[str, Any], provider: str) -> tuple[dict[str, 
     return payload, headers
 
 
+def cloudflare_result(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap a Workers AI REST envelope, failing closed on anything but a successful decision result."""
+    if envelope.get("success") is not True:
+        # Envelope errors are not reflected: they may echo request content.
+        raise CliError("Cloudflare Workers AI reported a failed request", 1)
+    result = envelope.get("result")
+    if not isinstance(result, dict) or not isinstance(answers := result.get("answers"), dict):
+        raise CliError("Cloudflare Workers AI returned a malformed result", 1)
+    if not all(isinstance(answer, dict) for answer in answers.values()):
+        raise CliError("Cloudflare Workers AI returned a malformed answer", 1)
+    return {
+        **result,
+        "answers": {name: {k: v for k, v in answer.items() if k != "type"} for name, answer in answers.items()},
+    }
+
+
 def normalize_response(result: dict[str, Any], provider: str) -> dict[str, Any]:
+    if provider == "cloudflare":
+        return cloudflare_result(result)
     if provider != "vercel":
         return result
     result = dict(result)
@@ -250,7 +277,26 @@ def normalize_response(result: dict[str, Any], provider: str) -> dict[str, Any]:
     return result
 
 
-def provider_endpoint(provider: str, override: str | None = None) -> str:
+_DEFAULT_MODEL: Any = object()
+
+
+def provider_endpoint(provider: str, override: str | None = None, model: Any = _DEFAULT_MODEL) -> str:
+    """Resolve the request URL; `model` is the effective payload model and matters only for cloudflare.
+
+    Only an omitted `model` falls back to the provider default; an explicit value, even a falsy one,
+    must be a supported Cloudflare model so the URL model always equals the body model.
+    """
+    if provider == "cloudflare":
+        if model is _DEFAULT_MODEL:
+            model = PROVIDERS[provider]["model"]
+        if not isinstance(model, str) or model not in CLOUDFLARE_MODELS:
+            raise CliError(f"cloudflare provider supports only models: {', '.join(CLOUDFLARE_MODELS)}", 2)
+        if override:
+            return override
+        account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+        if not re.fullmatch(r"[0-9a-fA-F]{32}", account):
+            raise CliError("cloudflare provider requires CLOUDFLARE_ACCOUNT_ID (32 hexadecimal characters)", 2)
+        return CLOUDFLARE_ENDPOINT.format(account=account, model=model)
     if override:
         return override
     if provider == "custom":
@@ -403,10 +449,11 @@ def main() -> int:
                 set_api_key(args.provider)
                 print(json.dumps({"ok": True, "stored": True, "store": str(CREDENTIALS_FILE)}))
             elif args.auth_command == "test":
+                model = provider_model(args.provider)
                 result = call(
                     {
                         "state": "authentication test",
-                        "model": provider_model(args.provider),
+                        "model": model,
                         "questions": {
                             "answer": {
                                 "type": "noul",
@@ -414,7 +461,7 @@ def main() -> int:
                             }
                         },
                     },
-                    provider_endpoint(args.provider),
+                    provider_endpoint(args.provider, None, model),
                     args.provider,
                 )
                 print(json.dumps({"ok": True, "valid": True, "model": result.get("model")}))
@@ -428,7 +475,8 @@ def main() -> int:
         if args.provider not in PROVIDERS:
             raise CliError(f"invalid JEV_PROVIDER: {args.provider}")
         payload, kind = request_for(args)
-        result = call(payload, provider_endpoint(args.provider, args.endpoint), args.provider)
+        endpoint = provider_endpoint(args.provider, args.endpoint, payload["model"])
+        result = call(payload, endpoint, args.provider)
         if args.value:
             print(primary_value(result, kind))
         else:

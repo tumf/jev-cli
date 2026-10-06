@@ -28,7 +28,7 @@ printf '%s' "$TYPESAFE_API_KEY" | jev auth set
 
 Resolution order:
 
-1. The selected provider's environment variable: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, or `JEV_API_KEY`
+1. The selected provider's environment variable: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, `JEV_API_KEY`, or `CLOUDFLARE_API_TOKEN`
 2. `$XDG_CONFIG_HOME/jev-cli/credentials.json`
 3. `~/.config/jev-cli/credentials.json`
 
@@ -56,6 +56,18 @@ jev noul -q 'Is this urgent?' -s 'Restore service today.' --value
 ```
 
 Set `JEV_MODEL` or pass `--model` when the proxy requires a different model name. Use only a trusted HTTPS endpoint because the custom bearer key is sent to it.
+
+For Cloudflare Workers AI Clef models (API token with the Workers AI Read and Edit permission):
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID='your-32-character-account-id'
+jev auth set --provider cloudflare
+jev auth test --provider cloudflare
+jev noul --provider cloudflare -q 'Is this urgent?' -s 'Restore service today.' --value
+jev noul --provider cloudflare --model clef -q 'Is this urgent?' -s 'Restore service today.' --value
+```
+
+`clef-flash` is the default and `clef` the only alternative; the request model selects the Workers AI URL. A missing or malformed account ID or an unsupported model fails before network access. The Workers AI envelope is unwrapped into the usual `noul`, `choice`, and `score` answers; a failed or malformed envelope is an error with no decisions.
 
 ## Typed questions
 

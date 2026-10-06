@@ -23,4 +23,4 @@
 - `cflx openspec validate add-cloudflare-clef --strict`
 - `cflx openspec validate add-cloudflare-clef --archive-gate`
 - `make test`
-
+- Corrected delivery baseline: `feat/cloudflare-clef` derives from `origin/main`; video assets and the video-only Japanese README are excluded. Latest `make check`: 81 tests OK and v0.6.3 wheel/sdist built; canonical strict validation passed.

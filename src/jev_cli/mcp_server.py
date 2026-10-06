@@ -27,7 +27,7 @@ from . import (
     question_request,
 )
 
-Provider = Literal["official", "vercel", "openrouter", "custom"]
+Provider = Literal["official", "vercel", "openrouter", "custom", "cloudflare"]
 
 State = Annotated[
     Any,
@@ -154,7 +154,7 @@ def selected_provider(provider: str | None) -> str:
 def evaluate(payload: dict[str, Any], provider: str, endpoint: str | None) -> dict[str, Any]:
     """Send a prepared request through the shared client and bound every failure to a tool error."""
     try:
-        return call(payload, provider_endpoint(provider, endpoint), provider)
+        return call(payload, provider_endpoint(provider, endpoint, payload["model"]), provider)
     except CliError as exc:
         raise ToolError(str(exc)) from exc
     except (KeyError, TypeError) as exc:

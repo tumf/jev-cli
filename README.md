@@ -82,6 +82,7 @@ Jev is also available through Vercel AI Gateway and OpenRouter. Select a provide
 | Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` | `typesafe-ai/jev` |
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `typesafe/jev-1.13` |
 | Jev-compatible proxy | `custom` | `JEV_API_KEY` | `JEV_MODEL` or `jev-latest` |
+| Cloudflare Workers AI (Clef) | `cloudflare` | `CLOUDFLARE_API_TOKEN` | `clef-flash` |
 
 Store and test a provider-specific key without exposing it in shell history:
 
@@ -117,6 +118,23 @@ jev noul -q 'Is this urgent?' -s 'Restore service today.' --value
 ```
 
 `--endpoint` can replace `JEV_ENDPOINT` for one command. The CLI sends `JEV_API_KEY` to that endpoint as a bearer token, so use only a trusted HTTPS endpoint.
+
+### Cloudflare Workers AI (Clef)
+
+The `cloudflare` provider runs Cloudflare's Clef decision models through the Workers AI REST API. `clef-flash` is the default; select `clef` with `--model clef`. No other model is accepted for this provider.
+
+Create a Cloudflare API token with the **Workers AI** permission (Read and Edit), and set the 32-character account ID. The account ID is not secret and is read from the environment; the token can come from `CLOUDFLARE_API_TOKEN` or the credential store.
+
+```bash
+export CLOUDFLARE_ACCOUNT_ID='your-32-character-account-id'
+jev auth set --provider cloudflare   # or: export CLOUDFLARE_API_TOKEN='your-api-token'
+jev auth test --provider cloudflare
+
+jev noul --provider cloudflare -q 'Is this urgent?' -s 'Restore service today.' --value
+jev noul --provider cloudflare --model clef -q 'Is this urgent?' -s 'Restore service today.' --value
+```
+
+The request goes to `https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/cloudflare/<model>`, where `<model>` is the request's model. A missing or malformed account ID, or an unsupported model, fails before any network access. The CLI unwraps the Workers AI response envelope and prints the same answer keys as the other providers (`noul`, `choice`, `score`, plus `probabilities`, `confidence`, and `legend` when Clef returns them). A response with `success` other than `true`, or without a result object with answers, is an error and prints no decisions. `run` forwards additional request members such as Clef's `images` unchanged.
 
 For non-interactive automation, piping the key to `jev auth set` remains supported.
 

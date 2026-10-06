@@ -42,8 +42,8 @@ Read [references/cli.md](references/cli.md) for copy-paste command forms, inputs
 - Give `score` levels in ascending order; the returned number may be fractional.
 - Use `--json-state` only when the state must retain JSON structure.
 - Use `@file` or stdin for long input instead of embedding it in shell arguments. These forms are CLI-only: the MCP tools send `state` verbatim, so read the file in the host and pass its content.
-- The official TypeSafe API is the default. Use `--provider vercel`, `--provider openrouter`, or `--provider custom` only when the caller selects another provider.
-- Use the provider-specific environment variable only for process-level overrides: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, or `JEV_API_KEY`. A custom provider also requires `JEV_ENDPOINT`; `JEV_MODEL` is optional. The normal credential store remains under the user's config directory.
+- The official TypeSafe API is the default. Use `--provider vercel`, `--provider openrouter`, `--provider custom`, or `--provider cloudflare` only when the caller selects another provider.
+- Use the provider-specific environment variable only for process-level overrides: `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY`, `OPENROUTER_API_KEY`, `JEV_API_KEY`, or `CLOUDFLARE_API_TOKEN`. A custom provider also requires `JEV_ENDPOINT`; `JEV_MODEL` is optional. The cloudflare provider also requires `CLOUDFLARE_ACCOUNT_ID` (32 hexadecimal characters) and accepts only `clef-flash` (default) or `clef`. The normal credential store remains under the user's config directory.
 - Treat model output as a structured judgment, not verified fact. Keep consequential actions behind the caller's own validation and authorization rules.
 
 ## Common pitfalls

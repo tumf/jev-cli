@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -209,6 +211,84 @@ def state_value(value: str | None, force_json: bool) -> Any:
     return text
 
 
+IMAGE_HEADER = "TypeSafe-Danger-Zone-Images"
+IMAGE_MAX_BYTES = 16 * 1024 * 1024
+IMAGE_SIDE = (280, 1568)
+IMAGE_PIXELS = (78_400, 2_458_624)
+
+
+def image_dimensions(data: bytes) -> tuple[str, int, int]:
+    """Return (format, width, height) for a still PNG or JPEG, read from its header."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        position = 8
+        while position + 8 <= len(data):
+            length = int.from_bytes(data[position : position + 4], "big")
+            kind = data[position + 4 : position + 8]
+            if kind == b"acTL":
+                raise CliError("animated PNG images are not supported")
+            if kind == b"IDAT":
+                break
+            position += 12 + length
+        return "png", int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+    if data.startswith(b"\xff\xd8"):
+        position = 2
+        while position + 4 <= len(data):
+            if data[position] != 0xFF:
+                break
+            marker = data[position + 1]
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                position += 2
+                continue
+            length = int.from_bytes(data[position + 2 : position + 4], "big")
+            # SOF markers carry the frame size; C4, C8 and CC share the range but are not frames.
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                height = int.from_bytes(data[position + 5 : position + 7], "big")
+                width = int.from_bytes(data[position + 7 : position + 9], "big")
+                return "jpg", width, height
+            position += 2 + length
+        raise CliError("could not read JPEG dimensions")
+    raise CliError("images must be PNG or JPEG")
+
+
+def image_asset(path: str) -> dict[str, Any]:
+    """Read and validate one image; images outside TypeSafe's limits are rejected, never resized."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError as exc:
+        raise CliError(f"cannot read image: {exc}") from exc
+    if len(data) > IMAGE_MAX_BYTES:
+        raise CliError(f"{path}: image is larger than 16 MiB")
+    try:
+        kind, width, height = image_dimensions(data)
+    except CliError as exc:
+        raise CliError(f"{path}: {exc}") from exc
+    low, high = IMAGE_SIDE
+    if not (low <= width <= high and low <= height <= high):
+        raise CliError(f"{path}: {width}x{height} is outside {low}-{high} px per side")
+    if not IMAGE_PIXELS[0] <= width * height <= IMAGE_PIXELS[1]:
+        raise CliError(f"{path}: {width * height} pixels is outside {IMAGE_PIXELS[0]}-{IMAGE_PIXELS[1]}")
+    return {"type": "image", "format": kind, "data_base64": base64.b64encode(data).decode()}
+
+
+def attach_images(payload: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+    """Put each image in the assets map and reference it from the state as image, image_2, ..."""
+    assets: dict[str, Any] = {}
+    references: dict[str, str] = {}
+    for index, path in enumerate(paths, 1):
+        asset = image_asset(path)
+        reference = f"image-{hashlib.sha256(asset['data_base64'].encode()).hexdigest()[:12]}"
+        assets[reference] = asset
+        references["image" if index == 1 else f"image_{index}"] = reference
+    state = payload["state"]
+    if isinstance(state, dict):
+        state = {**state, **references}
+    elif state is None:
+        state = references
+    else:
+        state = {"text": state, **references}
+    return {**payload, "state": state, "assets": assets}
+
+
 def split_pair(value: str) -> tuple[str, str]:
     key, separator, description = value.partition("=")
     if not separator or not key or not description:
@@ -327,6 +407,7 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
             "Content-Type": "application/json",
             "User-Agent": "jev-cli/0.7.0",
             **provider_headers,
+            **({IMAGE_HEADER: "true"} if payload.get("assets") else {}),
         },
         method="POST",
     )
@@ -392,16 +473,19 @@ def parser() -> argparse.ArgumentParser:
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
     noul.add_argument("-q", "--question", required=True, help="question to answer")
-    noul.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    noul.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    noul.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
 
     choice = sub.add_parser("choice", parents=[common], help="choose one option")
     choice.add_argument("-q", "--question", required=True, help="question to answer")
-    choice.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    choice.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    choice.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
     choice.add_argument("-o", "--option", action="append", type=split_pair, required=True, metavar="KEY=DESCRIPTION")
 
     score = sub.add_parser("score", parents=[common], help="score against ordered levels")
     score.add_argument("-q", "--question", required=True, help="question to answer")
-    score.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    score.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    score.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
     score.add_argument("-l", "--level", action="append", required=True, metavar="DESCRIPTION")
 
     run = sub.add_parser("run", parents=[common], help="send a complete request JSON for batched questions")
@@ -424,13 +508,20 @@ def request_for(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
         return payload, None
 
     criteria = dict(args.option) if args.command == "choice" else args.level if args.command == "score" else None
+    if args.image and args.provider == "cloudflare":
+        raise CliError("--image is not supported with the cloudflare provider; use run with Clef's images field")
+    if args.image and args.provider == "openrouter":
+        raise CliError("--image is not supported with the openrouter provider; it drops image assets, so use typesafe")
+    state = None if args.image and args.state is None else state_value(args.state, args.json_state)
     payload = question_request(
         args.command,
-        state_value(args.state, args.json_state),
+        state,
         args.question,
         criteria,
         args.model or provider_model(args.provider),
     )
+    if args.image:
+        payload = attach_images(payload, args.image)
     return payload, args.command
 
 

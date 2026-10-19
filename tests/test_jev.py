@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import tempfile
 import unittest
 import urllib.error
 from email.message import Message
@@ -103,6 +104,81 @@ class JevTest(unittest.TestCase):
         payload, kind = jev.request_for(args)
         self.assertEqual(kind, "choice")
         self.assertEqual(payload["questions"]["answer"]["criteria"], {"tech": "Bug", "sales": "Purchase"})
+
+    def write_image(self, directory, name, width, height, kind="png", animated=False):
+        if kind == "png":
+            ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes(5)
+            data = b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + ihdr + bytes(4)
+            if animated:
+                data += (8).to_bytes(4, "big") + b"acTL" + bytes(12)
+            data += bytes(4) + b"IDAT" + bytes(4)
+        else:
+            frame = bytes([8]) + height.to_bytes(2, "big") + width.to_bytes(2, "big") + bytes([1, 1, 0x11, 0])
+            data = b"\xff\xd8\xff\xe0\x00\x04\x00\x00\xff\xc0" + (len(frame) + 2).to_bytes(2, "big") + frame
+        path = Path(directory) / name
+        path.write_bytes(data)
+        return str(path)
+
+    def test_image_request_builds_assets_and_state_references(self):
+        with tempfile.TemporaryDirectory() as directory:
+            png = self.write_image(directory, "a.png", 640, 480)
+            jpg = self.write_image(directory, "b.jpg", 800, 600, kind="jpg")
+            args = jev.parser().parse_args(["noul", "-q", "Is `image` a receipt?", "-i", png, "-i", jpg])
+            payload, kind = jev.request_for(args)
+        self.assertEqual(kind, "noul")
+        state = payload["state"]
+        self.assertEqual(set(state), {"image", "image_2"})
+        self.assertEqual(payload["assets"][state["image"]]["format"], "png")
+        self.assertEqual(payload["assets"][state["image_2"]]["format"], "jpg")
+        self.assertEqual(payload["assets"][state["image"]]["type"], "image")
+
+    def test_image_with_text_state_keeps_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            png = self.write_image(directory, "a.png", 640, 480)
+            args = jev.parser().parse_args(["score", "-q", "Quality?", "-s", "note", "-i", png, "-l", "bad", "-l", "good"])
+            payload, _ = jev.request_for(args)
+        self.assertEqual(payload["state"]["text"], "note")
+        self.assertIn("image", payload["state"])
+
+    def test_image_limits_are_enforced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cases = {
+                "small": self.write_image(directory, "s.png", 100, 400),
+                "large": self.write_image(directory, "l.jpg", 2000, 400, kind="jpg"),
+                "animated": self.write_image(directory, "a.png", 640, 480, animated=True),
+            }
+            gif = Path(directory) / "x.gif"
+            gif.write_bytes(b"GIF89a")
+            cases["format"] = str(gif)
+            for name, path in cases.items():
+                with self.subTest(name), self.assertRaises(jev.CliError):
+                    jev.image_asset(path)
+
+    def test_image_side_below_280_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(jev.CliError):
+                jev.image_asset(self.write_image(directory, "s.png", 279, 400))
+            jev.image_asset(self.write_image(directory, "ok.png", 280, 400))
+
+    def test_image_with_openrouter_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            png = self.write_image(directory, "a.png", 640, 480)
+            args = jev.parser().parse_args(["noul", "-q", "Receipt?", "-i", png, "--provider", "openrouter"])
+            with self.assertRaisesRegex(jev.CliError, "openrouter"):
+                jev.request_for(args)
+
+    def test_image_requests_send_the_images_header(self):
+        def respond(*_args, **_kwargs):
+            response = MagicMock()
+            response.__enter__.return_value = io.BytesIO(b'{"answers": {}}')
+            return response
+
+        with patch.dict(os.environ, {"TYPESAFE_API_KEY": "k"}), patch("urllib.request.urlopen", side_effect=respond) as opened:
+            jev.call({"state": {}, "model": "m", "questions": {}, "assets": {"x": {}}}, "https://example.test")
+            jev.call({"state": "", "model": "m", "questions": {}}, "https://example.test")
+        with_images, without = (call.args[0] for call in opened.call_args_list)
+        self.assertEqual(with_images.get_header("Typesafe-danger-zone-images"), "true")
+        self.assertIsNone(without.get_header("Typesafe-danger-zone-images"))
 
     def test_short_options_for_question_and_state(self):
         args = jev.parser().parse_args(["noul", "-q", "Urgent?", "-s", "today", "--value"])

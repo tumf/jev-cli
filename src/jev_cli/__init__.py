@@ -30,7 +30,7 @@ PROVIDERS = {
     "openrouter": {
         "endpoint": "https://openrouter.ai/api/alpha/decisions",
         "key_env": "OPENROUTER_API_KEY",
-        "model": "typesafe/jev-1.13",
+        "model": "typesafe/jev-1.14",
     },
     "custom": {
         "endpoint": None,

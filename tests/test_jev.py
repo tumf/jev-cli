@@ -182,7 +182,7 @@ class JevTest(unittest.TestCase):
         cases = {
             "official": "jev-latest",
             "vercel": "typesafe-ai/jev",
-            "openrouter": "typesafe/jev-1.13",
+            "openrouter": "typesafe/jev-1.14",
             "custom": "jev-latest",
             "cloudflare": "clef-flash",
         }

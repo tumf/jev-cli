@@ -334,7 +334,7 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
         for provider, model in (
             ("official", "jev-latest"),
             ("vercel", "typesafe-ai/jev"),
-            ("openrouter", "typesafe/jev-1.13"),
+            ("openrouter", "typesafe/jev-1.14"),
         ):
             with self.subTest(provider=provider):
                 _, call = await self.invoke(

@@ -1,0 +1,8 @@
+## 1. Implementation and verification
+
+- [ ] verification-id: clef-contract — Add mocked CLI and MCP coverage for missing requested answers (including a partially answered batch; no success output) and preserve valid zero/fractional answers. Fix the shared Cloudflare path only; use the submitted question IDs, and do not require exact answer-key equality. Update the existing Cloudflare provider fixture that asserts success with an empty answers map. Assert the tool schemas describe fractional scores. Clarify the MCP `score` tool and `run` score question descriptions. (verification: integration: make check)
+- [ ] verification-id: clef-contract — Run make check and strict OpenSpec validation; keep the deltas archive-ready without unrelated changes. (verification: integration: make check)
+
+### Independent implementation review
+
+On asagi use `/home/tumf/.local/bin/claude-auto` for Claude CLI work and `/home/tumf/.local/bin/claude-auto-fable` for Fable; no direct Claude work or built-in Agent/Task substitute. From the candidate cwd, save a UUID-named prompt in the task's SSD area and use `/home/tumf/bin/with-ssd-tmp /home/tumf/.cargo/bin/agent-exec run --stdin-file <absolute-prompt> -- /home/tumf/.local/bin/claude-auto-fable --output-format stream-json --verbose --include-partial-messages --print` with PATH including `/home/tumf/.local/bin`, `/home/tumf/bin`, `/home/tumf/.cargo/bin`, `/usr/local/bin`, `/usr/bin`, and `/bin`. Request focused read-only review. Keep job ID, raw log path, actual launch argv, final answer and actual model in task-local evidence; report fallback honestly. Never print all environment variables, credentials, or shell snapshots; do not push or release.

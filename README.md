@@ -268,6 +268,44 @@ printf '%s' '{"message":"Please respond today"}' | \
   --value
 ```
 
+### Images
+
+`noul`, `choice`, and `score` accept `--image PATH` (`-i`), repeatable, for PNG or JPEG files. With `--image`, the state is optional and stdin is not read unless `--state` is given.
+
+```bash
+jev noul \
+  --question 'Is `image` a receipt?' \
+  --image receipt.png \
+  --value
+```
+
+Each file is base64-encoded into the request's `assets` map and referenced from the state as `image`, `image_2`, `image_3`, and so on, in the order given. Text state is kept under `text`. The request also carries the `TypeSafe-Danger-Zone-Images: true` header.
+
+The following are rejected before any network access:
+
+- A JSON state that already contains one of the generated keys (`image`, `image_2`, ...). The CLI never replaces your keys; rename them in the state.
+- A file larger than 16 MiB. At most 16 MiB plus one byte of any path is read.
+- A request whose serialized size, base64 image data included, exceeds 32 MiB. Base64 adds about one third, so several large images can exceed this even when each file is under 16 MiB. The same file given more than once is sent once.
+- Anything other than a still PNG or JPEG, including animated PNG.
+- A side outside 280-1568 px, or a pixel count outside 78,400-2,458,624. Images are never resized.
+- A header-only or obviously truncated file: a PNG must have a leading `IHDR`, non-empty `IDAT`, and a closing `IEND` chunk; a JPEG must have a frame header, a scan with data, and an end-of-image marker.
+
+This validation is structural only. The CLI does not decode images: it does not verify PNG checksums, decompress pixel data, or decode JPEG scans, so a corrupt file with intact structure is still sent and the API decides whether it is usable.
+
+Provider support for `--image`:
+
+| Provider | `--image` |
+|---|---|
+| `official` | Supported. |
+| `custom` | Sent as above; the proxy must implement the native `assets` contract. |
+| `vercel` | Sent as above; not verified by this project. |
+| `openrouter` | Rejected. OpenRouter does not accept this encoding. Use `--provider official`, or build a request that uses OpenRouter Decisions' own `image_url` state parts and send it with `jev run --provider openrouter`. |
+| `cloudflare` | Rejected. Use `jev run` with Clef's `images` field. |
+
+`run` sends your request JSON as written and performs none of the image checks above.
+
+For requests containing `assets`, HTTP errors report the status but omit the response body, because it may quote private image data or state.
+
 ## Batch questions
 
 Jev evaluates questions independently against the same state. Use `run` to send a complete System One request and avoid one API call per question.

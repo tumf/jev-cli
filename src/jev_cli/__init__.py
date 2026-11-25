@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
+import hashlib
 import json
 import os
 import re
@@ -209,6 +211,144 @@ def state_value(value: str | None, force_json: bool) -> Any:
     return text
 
 
+IMAGE_HEADER = "TypeSafe-Danger-Zone-Images"
+IMAGE_MAX_BYTES = 16 * 1024 * 1024
+IMAGE_SIDE = (280, 1568)
+IMAGE_PIXELS = (78_400, 2_458_624)
+# Native System One limit for the whole serialized request, base64 image data included.
+REQUEST_MAX_BYTES = 32 * 1024 * 1024
+ERROR_BODY_MAX_BYTES = 64 * 1024
+ERROR_DETAIL_MAX_CHARS = 2000
+
+
+def image_dimensions(data: bytes) -> tuple[str, int, int]:
+    """Return (format, width, height) for a structurally complete still PNG or JPEG.
+
+    This is a container check, not a decoder: it walks PNG chunks / JPEG segments so that
+    header-only and obviously truncated files are rejected. It does not verify PNG CRCs,
+    decompress pixel data, or decode JPEG scans, so a corrupt image can still pass.
+    """
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        position = 8
+        size: tuple[int, int] | None = None
+        has_pixels = False
+        while position + 12 <= len(data):
+            length = int.from_bytes(data[position : position + 4], "big")
+            kind = data[position + 4 : position + 8]
+            end = position + 12 + length  # length, type, data and CRC
+            if end > len(data):
+                break
+            if size is None:
+                if kind != b"IHDR" or length != 13:
+                    raise CliError("PNG does not start with an IHDR chunk")
+                size = (int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big"))
+            elif kind == b"acTL":
+                raise CliError("animated PNG images are not supported")
+            elif kind == b"IDAT":
+                has_pixels = has_pixels or length > 0
+            elif kind == b"IEND":
+                if not has_pixels:
+                    raise CliError("PNG has no image data")
+                return "png", size[0], size[1]
+            position = end
+        raise CliError("PNG is truncated or incomplete")
+    if data.startswith(b"\xff\xd8"):
+        position = 2
+        size = None
+        while position + 4 <= len(data):
+            if data[position] != 0xFF:
+                break
+            marker = data[position + 1]
+            if marker == 0xFF:  # fill byte before a marker
+                position += 1
+                continue
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                position += 2
+                continue
+            if marker == 0xD9:  # end of image before any scan
+                break
+            length = int.from_bytes(data[position + 2 : position + 4], "big")
+            end = position + 2 + length
+            if length < 2 or end > len(data):
+                break
+            if marker == 0xDA:
+                # A scan must follow a frame header, hold entropy data, and be closed by EOI.
+                if size is None or data.find(b"\xff\xd9", end + 1) < 0:
+                    break
+                return "jpg", size[0], size[1]
+            # SOF markers carry the frame size; C4, C8 and CC share the range but are not frames.
+            if size is None and 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                if length < 8:
+                    break
+                height = int.from_bytes(data[position + 5 : position + 7], "big")
+                width = int.from_bytes(data[position + 7 : position + 9], "big")
+                size = (width, height)
+            position = end
+        raise CliError("JPEG is truncated or incomplete")
+    raise CliError("images must be PNG or JPEG")
+
+
+def image_asset(path: str) -> dict[str, Any]:
+    """Read and validate one image; images outside TypeSafe's limits are rejected, never resized."""
+    try:
+        # Bounded read: never load more than one byte past the limit, whatever the path points at.
+        with open(path, "rb") as file:
+            data = file.read(IMAGE_MAX_BYTES + 1)
+    except OSError as exc:
+        raise CliError(f"cannot read image: {exc}") from exc
+    if len(data) > IMAGE_MAX_BYTES:
+        raise CliError(f"{path}: image is larger than 16 MiB")
+    try:
+        kind, width, height = image_dimensions(data)
+    except CliError as exc:
+        raise CliError(f"{path}: {exc}") from exc
+    low, high = IMAGE_SIDE
+    if not (low <= width <= high and low <= height <= high):
+        raise CliError(f"{path}: {width}x{height} is outside {low}-{high} px per side")
+    if not IMAGE_PIXELS[0] <= width * height <= IMAGE_PIXELS[1]:
+        raise CliError(f"{path}: {width * height} pixels is outside {IMAGE_PIXELS[0]}-{IMAGE_PIXELS[1]}")
+    return {"type": "image", "format": kind, "data_base64": base64.b64encode(data).decode()}
+
+
+def attach_images(payload: dict[str, Any], paths: list[str]) -> dict[str, Any]:
+    """Put each image in the assets map and reference it from the state as image, image_2, ...
+
+    Fails before any network access when a generated state key would replace a caller-supplied
+    one, or when the serialized request would exceed the native request size limit.
+    """
+    state = payload["state"]
+    names = ["image" if index == 1 else f"image_{index}" for index in range(1, len(paths) + 1)]
+    if isinstance(state, dict) and (taken := [name for name in names if name in state]):
+        raise CliError(f"state already has the key(s) {', '.join(taken)} that --image generates; rename them in the state")
+    too_large = "request with images is larger than 32 MiB once base64-encoded; send fewer or smaller images"
+    assets: dict[str, Any] = {}
+    references: dict[str, str] = {}
+    encoded = 0
+    for name, path in zip(names, paths):
+        asset = image_asset(path)
+        reference = f"image-{hashlib.sha256(asset['data_base64'].encode()).hexdigest()[:12]}"
+        if reference not in assets:
+            # Stop reading further files as soon as the image data alone is over the limit.
+            encoded += len(asset["data_base64"])
+            if encoded > REQUEST_MAX_BYTES:
+                raise CliError(too_large)
+            assets[reference] = asset
+        elif assets[reference] != asset:
+            raise CliError(f"{path}: image reference collides with another image")
+        references[name] = reference
+    if isinstance(state, dict):
+        state = {**state, **references}
+    elif state is None:
+        state = references
+    else:
+        state = {"text": state, **references}
+    # Exact wire size without serializing the image data a second time.
+    skeleton = {**payload, "state": state, "assets": {key: {**value, "data_base64": ""} for key, value in assets.items()}}
+    if len(json.dumps(skeleton, ensure_ascii=False).encode()) + encoded > REQUEST_MAX_BYTES:
+        raise CliError(too_large)
+    return {**payload, "state": state, "assets": assets}
+
+
 def split_pair(value: str) -> tuple[str, str]:
     key, separator, description = value.partition("=")
     if not separator or not key or not description:
@@ -335,6 +475,7 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
             "Content-Type": "application/json",
             "User-Agent": "jev-cli/0.7.0",
             **provider_headers,
+            **({IMAGE_HEADER: "true"} if payload.get("assets") else {}),
         },
         method="POST",
     )
@@ -342,13 +483,14 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
         with urllib.request.urlopen(request, timeout=60) as response:
             result = json.load(response)
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode(errors="replace")
-        try:
-            detail = json.loads(body)
-        except json.JSONDecodeError:
-            detail = body
+        if payload.get("assets"):
+            # An upstream error can quote any portion of an image or its private context.
+            detail = "response body omitted for asset requests"
+        else:
+            body = exc.read(ERROR_BODY_MAX_BYTES).decode(errors="replace")
+            detail = json.dumps(body[:ERROR_DETAIL_MAX_CHARS], ensure_ascii=False)
         code = 3 if exc.code in (401, 403) else 4 if exc.code in (429, 500, 502, 503, 504) else 1
-        raise CliError(f"API HTTP {exc.code}: {json.dumps(detail, ensure_ascii=False)}", code) from exc
+        raise CliError(f"API HTTP {exc.code}: {detail}", code) from exc
     except json.JSONDecodeError as exc:
         raise CliError(f"API returned invalid JSON: {exc}", 4) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
@@ -400,16 +542,19 @@ def parser() -> argparse.ArgumentParser:
 
     noul = sub.add_parser("noul", parents=[common], help="answer one yes/no question with a probability")
     noul.add_argument("-q", "--question", required=True, help="question to answer")
-    noul.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    noul.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    noul.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
 
     choice = sub.add_parser("choice", parents=[common], help="choose one option")
     choice.add_argument("-q", "--question", required=True, help="question to answer")
-    choice.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    choice.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    choice.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
     choice.add_argument("-o", "--option", action="append", type=split_pair, required=True, metavar="KEY=DESCRIPTION")
 
     score = sub.add_parser("score", parents=[common], help="score against ordered levels")
     score.add_argument("-q", "--question", required=True, help="question to answer")
-    score.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin)")
+    score.add_argument("-s", "--state", help="text, @file, or - for stdin (default: stdin, or none with --image)")
+    score.add_argument("-i", "--image", action="append", default=[], metavar="PATH", help="PNG or JPEG to evaluate (repeatable)")
     score.add_argument("-l", "--level", action="append", required=True, metavar="DESCRIPTION")
 
     run = sub.add_parser("run", parents=[common], help="send a complete request JSON for batched questions")
@@ -432,13 +577,23 @@ def request_for(args: argparse.Namespace) -> tuple[dict[str, Any], str | None]:
         return payload, None
 
     criteria = dict(args.option) if args.command == "choice" else args.level if args.command == "score" else None
+    if args.image and args.provider == "cloudflare":
+        raise CliError("--image is not supported with the cloudflare provider; use run with Clef's images field")
+    if args.image and args.provider == "openrouter":
+        raise CliError(
+            "--image is not supported with the openrouter provider: it does not accept this CLI's image asset "
+            "encoding; use --provider official, or send OpenRouter's own image_url state parts with jev run"
+        )
+    state = None if args.image and args.state is None else state_value(args.state, args.json_state)
     payload = question_request(
         args.command,
-        state_value(args.state, args.json_state),
+        state,
         args.question,
         criteria,
         args.model or provider_model(args.provider),
     )
+    if args.image:
+        payload = attach_images(payload, args.image)
     return payload, args.command
 
 

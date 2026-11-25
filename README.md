@@ -54,7 +54,7 @@ jev --version
 Expected output:
 
 ```text
-jev 0.7.0
+jev 0.8.0
 ```
 
 ## Authentication

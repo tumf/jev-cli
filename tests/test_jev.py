@@ -4,9 +4,10 @@ import os
 import tempfile
 import unittest
 import urllib.error
+import zlib
 from email.message import Message
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 try:
     import termios
@@ -105,19 +106,151 @@ class JevTest(unittest.TestCase):
         self.assertEqual(kind, "choice")
         self.assertEqual(payload["questions"]["answer"]["criteria"], {"tech": "Bug", "sales": "Purchase"})
 
-    def write_image(self, directory, name, width, height, kind="png", animated=False):
+    @staticmethod
+    def image_bytes(width, height, kind="png", animated=False, shade=0):
+        """Build a small, complete, decodable flat grayscale image (a synthetic fixture, no codec)."""
         if kind == "png":
-            ihdr = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes(5)
-            data = b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + ihdr + bytes(4)
-            if animated:
-                data += (8).to_bytes(4, "big") + b"acTL" + bytes(12)
-            data += bytes(4) + b"IDAT" + bytes(4)
-        else:
-            frame = bytes([8]) + height.to_bytes(2, "big") + width.to_bytes(2, "big") + bytes([1, 1, 0x11, 0])
-            data = b"\xff\xd8\xff\xe0\x00\x04\x00\x00\xff\xc0" + (len(frame) + 2).to_bytes(2, "big") + frame
+
+            def chunk(name, body):
+                return len(body).to_bytes(4, "big") + name + body + zlib.crc32(name + body).to_bytes(4, "big")
+
+            # 8-bit grayscale, no interlace; every scanline is a filter byte plus `width` samples.
+            header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 0, 0, 0, 0])
+            pixels = zlib.compress((b"\x00" + bytes([shade]) * width) * height)
+            control = chunk(b"acTL", (1).to_bytes(4, "big") + bytes(4)) if animated else b""
+            return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + control + chunk(b"IDAT", pixels) + chunk(b"IEND", b"")
+
+        def segment(marker, body):
+            return bytes([0xFF, marker]) + (len(body) + 2).to_bytes(2, "big") + body
+
+        # Baseline grayscale JPEG: one-code DC and AC Huffman tables, so each 8x8 block is the
+        # two bits "00" (zero DC difference, then end of block). The scan is padded with 1 bits.
+        bits = 2 * -(-width // 8) * -(-height // 8)
+        scan = bytes(bits // 8) + (bytes([0xFF >> (bits % 8)]) if bits % 8 else b"")
+        return (
+            b"\xff\xd8"
+            + segment(0xE0, b"JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00")
+            + segment(0xDB, b"\x00" + bytes([1 + shade]) * 64)
+            + segment(0xC0, bytes([8]) + height.to_bytes(2, "big") + width.to_bytes(2, "big") + bytes([1, 1, 0x11, 0]))
+            + segment(0xC4, b"\x00" + bytes([1]) + bytes(15) + b"\x00")
+            + segment(0xC4, b"\x10" + bytes([1]) + bytes(15) + b"\x00")
+            + segment(0xDA, bytes([1, 1, 0x00, 0, 63, 0]))
+            + scan
+            + b"\xff\xd9"
+        )
+
+    def write_image(self, directory, name, width, height, kind="png", animated=False, shade=0):
         path = Path(directory) / name
-        path.write_bytes(data)
+        path.write_bytes(self.image_bytes(width, height, kind, animated, shade))
         return str(path)
+
+    def test_state_key_collision_is_rejected_before_reading_or_sending(self):
+        # The image path does not exist: the collision must be reported before any file is read.
+        for state, images, taken in (
+            ('{"image": "mine"}', ["missing.png"], "image"),
+            ('{"image_2": "mine", "note": 1}', ["missing.png", "missing-2.png"], "image_2"),
+        ):
+            argv = ["jev", "noul", "-q", "Receipt?", "--json-state", "-s", state]
+            for image in images:
+                argv += ["-i", image]
+            with self.subTest(taken), patch("sys.argv", argv), patch("urllib.request.urlopen") as opened, patch(
+                "sys.stderr", new_callable=io.StringIO
+            ) as stderr:
+                self.assertEqual(jev.main(), 2)
+            opened.assert_not_called()
+            self.assertIn(f"already has the key(s) {taken}", json.loads(stderr.getvalue())["error"])
+
+    def test_json_state_without_generated_keys_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            png = self.write_image(directory, "a.png", 640, 480)
+            args = jev.parser().parse_args(
+                ["noul", "-q", "Receipt?", "--json-state", "-s", '{"note": "n", "image_2": "kept"}', "-i", png]
+            )
+            payload, _ = jev.request_for(args)
+        self.assertEqual(payload["state"]["note"], "n")
+        self.assertEqual(payload["state"]["image_2"], "kept")
+        self.assertIn(payload["state"]["image"], payload["assets"])
+
+    def test_image_read_is_bounded(self):
+        data = self.image_bytes(640, 480)
+        with patch("builtins.open", mock_open(read_data=data)) as opened:
+            jev.image_asset("a.png")
+        opened.return_value.read.assert_called_once_with(jev.IMAGE_MAX_BYTES + 1)
+        self.assertEqual(jev.IMAGE_MAX_BYTES, 16 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as directory, patch.object(jev, "IMAGE_MAX_BYTES", len(data) - 1):
+            with self.assertRaisesRegex(jev.CliError, "larger than 16 MiB"):
+                jev.image_asset(self.write_image(directory, "a.png", 640, 480))
+
+    def test_total_request_size_is_bounded_for_repeated_images(self):
+        self.assertEqual(jev.REQUEST_MAX_BYTES, 32 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as directory:
+            first = self.write_image(directory, "a.png", 640, 480)
+            second = self.write_image(directory, "b.png", 640, 480, shade=200)
+            encoded = sum(len(jev.image_asset(path)["data_base64"]) for path in (first, second))
+            payload = jev.question_request("noul", None, "Receipt?", None, "m")
+            for limit in (encoded - 1, encoded + 10):
+                with self.subTest(limit=limit), patch.object(jev, "REQUEST_MAX_BYTES", limit):
+                    with self.assertRaisesRegex(jev.CliError, "larger than 32 MiB"):
+                        jev.attach_images(payload, [first, second])
+            with patch.object(jev, "REQUEST_MAX_BYTES", encoded + 10_000):
+                request = jev.attach_images(payload, [first, second])
+                self.assertLessEqual(len(json.dumps(request, ensure_ascii=False).encode()), encoded + 10_000)
+            # The same image repeated is sent once, so it counts once against the limit.
+            with patch.object(jev, "REQUEST_MAX_BYTES", encoded // 2 + 10_000):
+                repeated = jev.attach_images(payload, [first, first, first])
+        self.assertEqual(len(repeated["assets"]), 1)
+        self.assertEqual(set(repeated["state"]), {"image", "image_2", "image_3"})
+        self.assertEqual(len(set(repeated["state"].values())), 1)
+
+    def test_truncated_or_header_only_images_are_rejected(self):
+        png = self.image_bytes(640, 480)
+        jpg = self.image_bytes(800, 600, kind="jpg")
+        frame = jpg.index(b"\xff\xc0")
+        scan = jpg.index(b"\xff\xda")
+        cases = {
+            "png signature only": png[:8],
+            "png header only": png[:33],
+            "png cut inside pixel data": png[:60],
+            "png without end chunk": png[:-12],
+            "png without pixel data": png[:33] + png[-12:],
+            "jpeg marker only": jpg[:2],
+            "jpeg header only": jpg[: frame + 19],
+            "jpeg without scan": jpg[:scan] + b"\xff\xd9",
+            "jpeg scan header only": jpg[: scan + 10] + b"\xff\xd9",
+            "jpeg without end marker": jpg[:-2],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            for name, data in cases.items():
+                path = Path(directory) / "image.bin"
+                path.write_bytes(data)
+                with self.subTest(name), self.assertRaisesRegex(jev.CliError, "truncated or incomplete|no image data|PNG or JPEG"):
+                    jev.image_asset(str(path))
+        self.assertEqual(jev.image_dimensions(png), ("png", 640, 480))
+        self.assertEqual(jev.image_dimensions(jpg), ("jpg", 800, 600))
+
+    def test_http_error_does_not_reflect_image_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            asset = jev.image_asset(self.write_image(directory, "a.png", 640, 480))
+        encoded = asset["data_base64"]
+        payload = {"state": {"image": "image-x"}, "model": "m", "questions": {}, "assets": {"image-x": asset}}
+        bodies = {
+            "whole": json.dumps({"error": "bad request", "request": payload}).encode(),
+            "partial": json.dumps({"error": "bad image: " + "QUJD" * 100}).encode(),
+            "plain": ("<html>" + encoded + "</html>").encode(),
+            "huge": json.dumps({"error": "x " * 200_000}).encode(),
+        }
+        for name, body in bodies.items():
+            error = urllib.error.HTTPError("https://example.test", 400, "Bad Request", Message(), io.BytesIO(body))
+            with self.subTest(name), patch.object(jev, "api_key", return_value="test-key"), patch(
+                "urllib.request.urlopen", side_effect=error
+            ):
+                with self.assertRaisesRegex(jev.CliError, "API HTTP 400") as raised:
+                    jev.call(payload, "https://example.test")
+                message = str(raised.exception)
+                self.assertEqual(raised.exception.exit_code, 1)
+                self.assertNotIn(encoded, message)
+                self.assertNotIn("QUJD" * 50, message)
+                self.assertEqual(message, "API HTTP 400: response body omitted for asset requests")
 
     def test_image_request_builds_assets_and_state_references(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -150,8 +283,9 @@ class JevTest(unittest.TestCase):
             gif = Path(directory) / "x.gif"
             gif.write_bytes(b"GIF89a")
             cases["format"] = str(gif)
+            reasons = {"small": "px per side", "large": "px per side", "animated": "animated", "format": "PNG or JPEG"}
             for name, path in cases.items():
-                with self.subTest(name), self.assertRaises(jev.CliError):
+                with self.subTest(name), self.assertRaisesRegex(jev.CliError, reasons[name]):
                     jev.image_asset(path)
 
     def test_image_side_below_280_is_rejected(self):
@@ -164,8 +298,12 @@ class JevTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             png = self.write_image(directory, "a.png", 640, 480)
             args = jev.parser().parse_args(["noul", "-q", "Receipt?", "-i", png, "--provider", "openrouter"])
-            with self.assertRaisesRegex(jev.CliError, "openrouter"):
+            with self.assertRaisesRegex(jev.CliError, "openrouter") as raised:
                 jev.request_for(args)
+        message = str(raised.exception)
+        self.assertIn("--provider official", message)
+        self.assertIn("jev run", message)
+        self.assertNotIn("use typesafe", message)
 
     def test_image_requests_send_the_images_header(self):
         def respond(*_args, **_kwargs):

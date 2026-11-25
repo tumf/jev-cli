@@ -80,7 +80,7 @@ Jev is also available through Vercel AI Gateway and OpenRouter. Select a provide
 |---|---|---|---|
 | TypeSafe official | `official` | `TYPESAFE_API_KEY` | `jev-latest` |
 | Vercel AI Gateway | `vercel` | `AI_GATEWAY_API_KEY` | `typesafe-ai/jev` |
-| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `typesafe/jev-1.13` |
+| OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `typesafe/jev-1.14` |
 | Jev-compatible proxy | `custom` | `JEV_API_KEY` | `JEV_MODEL` or `jev-latest` |
 | Cloudflare Workers AI (Clef) | `cloudflare` | `CLOUDFLARE_API_TOKEN` | `clef-flash` |
 

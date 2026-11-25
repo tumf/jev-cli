@@ -109,6 +109,21 @@ class McpStdioTransportTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("choice", criteria)
         self.assertIn("score", criteria)
 
+    async def test_score_descriptions_explain_zero_based_fractional_scores(self):
+        schemas = await self.published_schemas()
+        run = schemas["run"]
+        request = resolve(run, run["properties"]["request"])
+        question = resolve(run, request["properties"]["questions"]["additionalProperties"])
+        descriptions = {
+            "score levels": schemas["score"]["properties"]["levels"]["description"],
+            "run criteria": question["properties"]["criteria"]["description"],
+        }
+        for name, description in descriptions.items():
+            with self.subTest(description=name):
+                self.assertIn("zero", description)
+                self.assertIn("fractional", description)
+                self.assertIn("Clef probability-weighted", description)
+
     async def test_the_readme_run_example_matches_the_published_request_schema(self):
         schema = (await self.published_schemas())["run"]
         example = readme_run_example()
@@ -596,6 +611,55 @@ class McpToolBehaviorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result.structured_content)
         self.assertNotIn("0.9", result.content[0].text)
         self.assertNotIn("cf-token", result.content[0].text)
+
+    async def cloudflare_tool(self, name, arguments, answers):
+        account = "0123456789abcdef0123456789abcdef"
+        body = {"success": True, "result": {"model": "clef-flash", "answers": answers}, "errors": [], "messages": []}
+        environment = {"CLOUDFLARE_ACCOUNT_ID": account, "CLOUDFLARE_API_TOKEN": "cf-token"}
+        with patch.dict(os.environ, environment), patch(
+            "urllib.request.urlopen", return_value=HttpResponse(json.dumps(body).encode())
+        ):
+            return await self.call_tool(name, {**arguments, "provider": "cloudflare"})
+
+    async def test_cloudflare_missing_requested_answers_are_tool_errors(self):
+        batch = {
+            "state": "s",
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "anger": {"type": "score", "instructions": "Anger?", "criteria": ["Calm", "Angry"]},
+            },
+        }
+        cases = (
+            ("noul", {"state": "s", "question": "q"}, {}),
+            ("score", {"state": "s", "question": "q", "levels": ["a", "b"]}, {"other": {"type": "score", "score": 0.7}}),
+            ("run", {"request": batch}, {"urgent": {"type": "noul", "noul": 0.7}}),
+        )
+        for name, arguments, answers in cases:
+            with self.subTest(tool=name):
+                result = await self.cloudflare_tool(name, arguments, answers)
+                self.assertTrue(result.is_error)
+                self.assertIsNone(result.structured_content)
+                self.assertIn("omitted a requested answer", result.content[0].text)
+                self.assertNotIn("0.7", result.content[0].text)
+                self.assertNotIn("cf-token", result.content[0].text)
+
+    async def test_cloudflare_complete_answers_keep_zero_and_fractional_scores(self):
+        batch = {
+            "state": "s",
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "anger": {"type": "score", "instructions": "Anger?", "criteria": ["Calm", "Angry"]},
+            },
+        }
+        answers = {"urgent": {"type": "noul", "noul": 0.0}, "anger": {"type": "score", "score": 0.35}}
+        result = await self.cloudflare_tool("run", {"request": batch}, answers)
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["answers"], {"urgent": {"noul": 0.0}, "anger": {"score": 0.35}})
+        result = await self.cloudflare_tool(
+            "score", {"state": "s", "question": "q", "levels": ["a", "b"]}, {"answer": {"type": "score", "score": 0}}
+        )
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["answers"], {"answer": {"score": 0}})
 
 
 if __name__ == "__main__":

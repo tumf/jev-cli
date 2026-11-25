@@ -310,7 +310,18 @@ class JevTest(unittest.TestCase):
             "official": {"answers": {}},
             "openrouter": {"answers": {}},
             "custom": {"answers": {}},
-            "cloudflare": {"success": True, "result": {"model": "clef-flash", "answers": {}}, "errors": []},
+            "cloudflare": {
+                "success": True,
+                "result": {
+                    "model": "clef-flash",
+                    "answers": {
+                        "urgent": {"type": "noul", "noul": 0.0},
+                        "route": {"type": "choice", "choice": "a"},
+                        "quality": {"type": "score", "score": 0.35},
+                    },
+                },
+                "errors": [],
+            },
             "vercel": {
                 "answers": {
                     "urgent": {"type": "boolean", "probability": 0.9},
@@ -347,7 +358,13 @@ class JevTest(unittest.TestCase):
                 self.assertEqual(result["answers"]["quality"]["score"], 1.0)
             elif provider == "cloudflare":
                 self.assertEqual(body, payload)
-                self.assertEqual(result, {"model": "clef-flash", "answers": {}})
+                self.assertEqual(
+                    result,
+                    {
+                        "model": "clef-flash",
+                        "answers": {"urgent": {"noul": 0.0}, "route": {"choice": "a"}, "quality": {"score": 0.35}},
+                    },
+                )
             else:
                 self.assertEqual(body, payload)
 
@@ -602,6 +619,89 @@ class CloudflareProviderTest(unittest.TestCase):
                     self.assertFalse(json.loads(stderr)["ok"])
                     self.assertNotIn("secret-input", stderr)
                     self.assertNotIn("cf-token", stderr)
+
+    def test_missing_requested_answers_never_emit_decisions(self):
+        batch = {
+            "state": "today",
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "anger": {"type": "score", "instructions": "Anger?", "criteria": ["Calm", "Angry"]},
+            },
+        }
+        cases = (
+            (["noul", "-q", "Urgent?", "-s", "today"], {}, None),
+            (["noul", "-q", "Urgent?", "-s", "today", "--value"], {}, None),
+            (["noul", "-q", "Urgent?", "-s", "today"], {"other": {"type": "noul", "noul": 0.7}}, None),
+            # A partially answered batch is still incomplete.
+            (["run", "-"], {"urgent": {"type": "noul", "noul": 0.7}}, batch),
+            (["auth", "test"], {}, None),
+        )
+        for argv, answers, request in cases:
+            with self.subTest(argv=argv, answers=answers):
+                code, stdout, stderr, captured = self.run_main(
+                    [*argv, "--provider", "cloudflare"],
+                    cloudflare_envelope(answers),
+                    stdin=io.StringIO(json.dumps(request)) if request else None,
+                )
+                self.assertEqual(len(captured), 1)
+                self.assertEqual(code, 1)
+                self.assertEqual(stdout, "")
+                error = json.loads(stderr)
+                self.assertFalse(error["ok"])
+                self.assertEqual(error["error"], "Cloudflare Workers AI omitted a requested answer")
+                self.assertNotIn("0.7", stderr)
+                self.assertNotIn("cf-token", stderr)
+
+    def test_complete_answers_preserve_zero_and_fractional_values(self):
+        request = {
+            "state": "today",
+            "questions": {
+                "urgent": {"type": "noul", "instructions": "Urgent?"},
+                "anger": {"type": "score", "instructions": "Anger?", "criteria": ["Calm", "Concerned", "Angry"]},
+                "level": {"type": "score", "instructions": "Level?", "criteria": ["Low", "High"]},
+            },
+        }
+        answers = {
+            "urgent": {"type": "noul", "noul": 0.0},
+            "anger": {"type": "score", "score": 1.4, "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5}},
+            "level": {"type": "score", "score": 0},
+            # Extra answers and fields are tolerated; exact key equality is not required.
+            "extra": {"type": "noul", "noul": 0.5, "unknown": True},
+        }
+        code, stdout, _, _ = self.run_main(
+            ["run", "-", "--provider", "cloudflare"], cloudflare_envelope(answers), stdin=io.StringIO(json.dumps(request))
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(stdout)["answers"],
+            {
+                "urgent": {"noul": 0.0},
+                "anger": {"score": 1.4, "probabilities": {"0": 0.1, "1": 0.4, "2": 0.5}},
+                "level": {"score": 0},
+                "extra": {"noul": 0.5, "unknown": True},
+            },
+        )
+        for value, expected in ((0.0, "0.0\n"), (0.25, "0.25\n")):
+            with self.subTest(value=value):
+                code, stdout, _, _ = self.run_main(
+                    ["score", "--provider", "cloudflare", "-q", "Q?", "-s", "today", "-l", "Low", "-l", "High", "--value"],
+                    cloudflare_envelope({"answer": {"type": "score", "score": value}}),
+                )
+                self.assertEqual((code, stdout), (0, expected))
+
+    def test_only_mapping_shaped_questions_are_checked(self):
+        envelope = cloudflare_envelope({"answer": {"type": "noul", "noul": 0.5}})
+        for questions in (None, ["missing"], "missing"):
+            with self.subTest(questions=questions):
+                self.assertEqual(jev.cloudflare_result(envelope, questions)["answers"], {"answer": {"noul": 0.5}})
+        with self.assertRaises(jev.CliError) as raised:
+            jev.cloudflare_result(envelope, {"missing": {}})
+        self.assertEqual(raised.exception.exit_code, 1)
+
+    def test_other_providers_do_not_require_complete_answers(self):
+        payload = {"model": "m", "state": "s", "questions": {"answer": {"type": "noul", "instructions": "Q?"}}}
+        self.assertEqual(jev.normalize_response({"answers": {}}, "official", payload["questions"]), {"answers": {}})
+        self.assertEqual(jev.normalize_response({"answers": {}}, "vercel", payload["questions"]), {"answers": {}})
 
     def test_http_failures_keep_existing_exit_codes(self):
         for status, expected in ((401, 3), (403, 3), (429, 4), (500, 4), (400, 1)):

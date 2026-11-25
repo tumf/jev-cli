@@ -1,7 +1,7 @@
 ## 1. Implementation and verification
 
-- [ ] verification-id: clef-contract — Add mocked CLI and MCP coverage for missing requested answers (including a partially answered batch; no success output) and preserve valid zero/fractional answers. Fix the shared Cloudflare path only; use the submitted question IDs, and do not require exact answer-key equality. Update the existing Cloudflare provider fixture that asserts success with an empty answers map. Assert the tool schemas describe fractional scores. Clarify the MCP `score` tool and `run` score question descriptions. (verification: integration: make check)
-- [ ] verification-id: clef-contract — Run make check and strict OpenSpec validation; keep the deltas archive-ready without unrelated changes. (verification: integration: make check)
+- [x] verification-id: clef-contract — Add mocked CLI and MCP coverage for missing requested answers (including a partially answered batch; no success output) and preserve valid zero/fractional answers. Fix the shared Cloudflare path only; use the submitted question IDs, and do not require exact answer-key equality. Update the existing Cloudflare provider fixture that asserts success with an empty answers map. Assert the tool schemas describe fractional scores. Clarify the MCP `score` tool and `run` score question descriptions. (verification: integration: make check)
+- [x] verification-id: clef-contract — Run make check and strict OpenSpec validation; keep the deltas archive-ready without unrelated changes. (verification: integration: make check)
 
 ### Independent implementation review
 

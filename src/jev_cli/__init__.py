@@ -244,8 +244,12 @@ def provider_request(payload: dict[str, Any], provider: str) -> tuple[dict[str, 
     return payload, headers
 
 
-def cloudflare_result(envelope: dict[str, Any]) -> dict[str, Any]:
-    """Unwrap a Workers AI REST envelope, failing closed on anything but a successful decision result."""
+def cloudflare_result(envelope: dict[str, Any], questions: Any = None) -> dict[str, Any]:
+    """Unwrap a Workers AI REST envelope, failing closed on anything but a successful decision result.
+
+    When the submitted `questions` is a mapping, every submitted question ID must have an answer;
+    extra answers are tolerated.
+    """
     if envelope.get("success") is not True:
         # Envelope errors are not reflected: they may echo request content.
         raise CliError("Cloudflare Workers AI reported a failed request", 1)
@@ -254,15 +258,18 @@ def cloudflare_result(envelope: dict[str, Any]) -> dict[str, Any]:
         raise CliError("Cloudflare Workers AI returned a malformed result", 1)
     if not all(isinstance(answer, dict) for answer in answers.values()):
         raise CliError("Cloudflare Workers AI returned a malformed answer", 1)
+    if isinstance(questions, dict) and any(name not in answers for name in questions):
+        # Neither the response nor the missing IDs are reflected; the message stays bounded.
+        raise CliError("Cloudflare Workers AI omitted a requested answer", 1)
     return {
         **result,
         "answers": {name: {k: v for k, v in answer.items() if k != "type"} for name, answer in answers.items()},
     }
 
 
-def normalize_response(result: dict[str, Any], provider: str) -> dict[str, Any]:
+def normalize_response(result: dict[str, Any], provider: str, questions: Any = None) -> dict[str, Any]:
     if provider == "cloudflare":
-        return cloudflare_result(result)
+        return cloudflare_result(result, questions)
     if provider != "vercel":
         return result
     result = dict(result)
@@ -318,6 +325,7 @@ def provider_model(provider: str) -> str:
 
 
 def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> dict[str, Any]:
+    questions = payload.get("questions")
     payload, provider_headers = provider_request(payload, provider)
     request = urllib.request.Request(
         endpoint,
@@ -347,7 +355,7 @@ def call(payload: dict[str, Any], endpoint: str, provider: str = "official") -> 
         raise CliError(f"API connection failed: {exc}", 4) from exc
     if not isinstance(result, dict):
         raise CliError("API returned a non-object response", 1)
-    return normalize_response(result, provider)
+    return normalize_response(result, provider, questions)
 
 
 def common_parser() -> argparse.ArgumentParser:

@@ -87,8 +87,8 @@ class QuestionSpec(TypedDict):
                     "Required by `choice` and `score`, omitted by `noul`. For `choice`, at "
                     "least two option keys mapped to what each key means; the selected key is "
                     "returned verbatim. For `score`, at least two level descriptions ordered "
-                    "from lowest to highest; the answer is the zero-based position of the "
-                    "selected level."
+                    "from lowest to highest, numbered from zero; the score is on that zero-based "
+                    "scale and may be fractional, for example a Clef probability-weighted score."
                 )
             ),
         ]
@@ -227,8 +227,9 @@ def score(
         list[str],
         Field(
             description=(
-                "At least two level descriptions ordered from lowest to highest. The answer is "
-                "the zero-based position of the selected level in this list."
+                "At least two level descriptions ordered from lowest to highest, numbered from "
+                "zero. The score is on that zero-based scale and may be fractional, for example "
+                "a Clef probability-weighted score."
             )
         ),
     ],
@@ -237,6 +238,8 @@ def score(
     endpoint: EndpointOverride = None,
 ) -> dict[str, Any]:
     """Score the state against at least two ordered levels, numbered from zero in the supplied order.
+
+    The score may be fractional, for example a Clef probability-weighted score between levels.
 
     The state is sent verbatim; `-` and `@path` are literal strings here, not stdin or a file.
     """
